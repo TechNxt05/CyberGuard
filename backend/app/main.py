@@ -205,6 +205,18 @@ async def chat_with_case(case_id: str, chat_req: ChatRequest, user_id: str = Dep
                         action_type=atype
                     )
             
+                # Sync Analysis to Case Details (for Dashboard/UI)
+                if new_case_state.dimensions:
+                    from backend.app.mcp_servers.memory.server import update_case_details
+                    dims = new_case_state.dimensions
+                    await update_case_details(case_id, user_id, {
+                        "incident_summary": dims.summary,
+                        "attack_type": dims.attack_type,
+                        "incident_logic": dims.logic,
+                        "prevention_tips": dims.prevention_tips,
+                        "current_phase": new_case_state.strategy.current_phase if new_case_state.strategy else "analysis"
+                    })
+            
         except Exception as e:
             print(f"Graph Error: {e}")
             ai_response = "I encountered an error analyzing your request. Please try again with more details."

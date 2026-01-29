@@ -248,7 +248,16 @@ async def chat_with_case(case_id: str, chat_req: ChatRequest, user_id: str = Dep
     # 4. Save AI Response
     await add_case_message(case_id, user_id, "agent", ai_response)
     
-    return {"reply": ai_response}
+    # 5. Fetch Updated State to return to Frontend (Real-time Update)
+    from backend.app.mcp_servers.memory.server import get_tasks, get_case
+    updated_tasks = await get_tasks(case_id, user_id)
+    updated_case = await get_case(user_id, case_id)
+    
+    return {
+        "reply": ai_response,
+        "tasks": updated_tasks,
+        "case_details": updated_case
+    }
 
 @app.post("/cases/{case_id}/chat")
 async def chat_with_case(case_id: str, chat_req: ChatRequest, user_id: str = Depends(get_current_user)):

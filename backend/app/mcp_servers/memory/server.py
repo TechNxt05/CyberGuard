@@ -116,10 +116,8 @@ async def update_case_details(case_id: str, user_id: str, updates: dict) -> str:
     
     if safe_updates:
         safe_updates["updated_at"] = datetime.utcnow()
-        try:
-            query_id = ObjectId(case_id)
-        except Exception:
-            query_id = case_id # Fallback if already objectid or invalid
+        # FIX: The _id is stored as a string UUID in create_case, so we MUST NOT convert it to ObjectId.
+        query_id = case_id
 
         result = await db["cases"].update_one(
             {"_id": query_id, "user_id": user_id},

@@ -236,7 +236,7 @@ export default function CaseChatPage() {
 
             {/* RIGHT: Sidebar (Tasks & Context) */}
             <div className="w-80 border-l border-white/10 bg-black/20 hidden md:flex flex-col h-full overflow-hidden">
-                <div className="p-6 border-b border-white/10 flex-1 overflow-y-auto">
+                <div className="p-6 border-b border-white/10 h-1/2 overflow-y-auto">
                     <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">Case Tasks</h2>
                     <div className="space-y-3">
                         {tasks.length === 0 ? (
@@ -300,7 +300,7 @@ export default function CaseChatPage() {
                     </div>
                 </div>
 
-                <div className="p-6 bg-black/40 border-t border-white/10">
+                <div className="p-6 bg-black/40 border-t border-white/10 h-1/2 overflow-y-auto">
                     <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">Case Analysis</h2>
                     <div className="space-y-4">
                         <Card className="p-4 bg-yellow-500/5 border-yellow-500/20">

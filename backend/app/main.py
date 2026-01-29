@@ -43,7 +43,7 @@ app = FastAPI(title="CyberGuardAI One - Platform Backend", version="2.0.0", life
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

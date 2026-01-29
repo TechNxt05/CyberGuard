@@ -51,7 +51,7 @@ export default function CaseChatPage() {
         const fetchData = async () => {
             try {
                 const token = await getToken();
-                const res = await fetch(`http://localhost:8000/cases/${id}`, {
+                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/cases/${id}`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 if (res.ok) {
@@ -118,7 +118,7 @@ export default function CaseChatPage() {
 
         try {
             const token = await getToken();
-            const res = await fetch(`http://localhost:8000/cases/${id}/chat`, {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/cases/${id}/chat`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -253,7 +253,7 @@ export default function CaseChatPage() {
                                         // API Call
                                         try {
                                             const token = await getToken();
-                                            await fetch(`http://localhost:8000/cases/${id}/tasks/${encodeURIComponent(t.label)}?status=${newStatus}`, {
+                                            await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/cases/${id}/tasks/${encodeURIComponent(t.label)}?status=${newStatus}`, {
                                                 method: "PUT",
                                                 headers: { Authorization: `Bearer ${token}` }
                                             });

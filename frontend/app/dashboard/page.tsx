@@ -30,7 +30,7 @@ export default function Dashboard() {
             if (!isSignedIn) return;
             try {
                 const token = await getToken();
-                const res = await fetch("http://localhost:8000/cases", {
+                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/cases`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 if (res.ok) {
@@ -52,7 +52,7 @@ export default function Dashboard() {
         setCreating(true);
         try {
             const token = await getToken();
-            const res = await fetch(`http://localhost:8000/cases?title=${encodeURIComponent(newCaseTitle)}&summary=${encodeURIComponent("Pending analysis...")}`, {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/cases?title=${encodeURIComponent(newCaseTitle)}&summary=${encodeURIComponent("Pending analysis...")}`, {
                 method: "POST",
                 headers: { Authorization: `Bearer ${token}` }
             });

@@ -214,7 +214,7 @@ async def chat_with_case(case_id: str, chat_req: ChatRequest, user_id: str = Dep
                         "attack_type": dims.attack_type,
                         "incident_logic": dims.incident_logic,
                         "prevention_tips": dims.prevention_tips,
-                        "current_phase": new_case_state.strategy.current_phase if new_case_state.strategy else "analysis"
+                        "current_phase": new_case_state.strategy.lifecycle_plan[0].phase if new_case_state.strategy and new_case_state.strategy.lifecycle_plan else "analysis"
                     })
             
         except Exception as e:

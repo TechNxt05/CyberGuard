@@ -20,15 +20,22 @@ A graph of specialized agents working together:
 -   **Understanding Agent**: Forensically analyzes your story to extract key data (Transaction IDs, Attack Vectors).
 -   **Strategy Agent**: Creates a custom **Lifecycle Plan** (Containment -> Reporting -> Recovery) based on verified playbooks.
 -   **Authority Mapper**: Identifies the *exact* Nodal Officer for your bank/platform using live search.
+-   **Guidance Agent**: Provides step-by-step, click-by-click navigation for confusing official portals (e.g., cybercrime.gov.in).
 
 ### 3. **ScamShield Detector** 🛡️
--   Upload screenshots or paste messages.
+-   **Multi-Modal Analysis**: Upload screenshots or paste messages.
 -   **Cross-Reference**: Checks the input against a database of 500+ known Indian scam patterns AND performs a live web search to confirm validity.
--   **Explainability**: Tells you *why* it's a scam in simple language.
+-   **Explainability**: Tells you *why* it's a scam in simple language with logic, mechanism, and consequences.
 
 ### 4. **"The Exact Solution"** 🔗
 -   **One-Click Portals**: Sidebar tasks link directly to the *correct* official dispute pages (validated by AI).
 -   **Smart Guidance**: Step-by-step navigation for confused users (e.g., "Where is the 'Cyber Cell' button?").
+-   **Real-time Updates**: Analysis and Tasks update dynamically as the conversation progresses.
+
+### 5. **Advanced User Interface** 💻
+-   **Dashboard**: Manage multiple cases with status tracking.
+-   **Case View**: Split-screen interface with Chat, Tasks, and Analysis Panel (50-50 split).
+-   **Dark Mode**: Sleek, modern "Glassmorphism" design built with TailwindCSS and Shadcn/UI.
 
 ---
 
@@ -36,9 +43,10 @@ A graph of specialized agents working together:
 
 -   **Frontend**: Next.js 14, TailwindCSS, Shadcn/UI (Modern Glassmorphism Design).
 -   **Backend**: Python FastAPI, LangGraph (Agent Orchestration).
--   **AI Core**: Groq Llama-3 (High Speed), Google Gemini (Multimodal), OpenAI (Optional).
+-   **AI Core**: Groq Llama-3 (High Speed), Google Gemini (Multimodal).
 -   **Tools**: DuckDuckGo Search, PRAW (Reddit), Tweepy (Twitter), BeautifulSoup4.
 -   **Database**: MongoDB Atlas (Vector Store + State Persistence).
+-   **Authentication**: Clerk.
 
 ---
 

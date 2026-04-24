@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from backend.app.auth.clerk_auth import get_current_user
-from backend.app.mcp_servers.memory.server import db
+from backend.app.db.mongodb import db
 from backend.app.schemas.case import Evidence, TimelineEvent
 
 router = APIRouter(prefix="/api/evidence", tags=["Evidence"])

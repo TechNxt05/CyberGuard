@@ -2,8 +2,8 @@ import React from "react";
 import { Clock } from "lucide-react";
 
 interface TimelineEvent {
-  time: str;
-  description: str;
+  time: string;
+  description: string;
 }
 
 interface InteractiveTimelineProps {

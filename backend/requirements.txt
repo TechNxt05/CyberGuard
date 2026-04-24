@@ -20,3 +20,7 @@ duckduckgo-search
 beautifulsoup4
 praw
 tweepy
+sentence-transformers
+fpdf2
+pymongo
+python-multipart

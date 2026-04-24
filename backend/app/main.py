@@ -53,6 +53,14 @@ app.add_middleware(
 def read_root():
     return {"status": "CyberGuardAI Platform Online", "auth": "Clerk Enabled", "db": "MongoDB Atlas"}
 
+# Import and include routers
+from backend.app.routers import analysis, evidence, scam_patterns, reports
+app.include_router(analysis.router)
+app.include_router(evidence.router)
+app.include_router(scam_patterns.router)
+app.include_router(reports.router)
+
+
 # ==========================================
 # PUBLIC ROUTES (ScamShield - No Login Required)
 # ==========================================

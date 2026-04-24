@@ -36,3 +36,34 @@ class Case(BaseModel):
 
     class Config:
         populate_by_name = True
+
+class Evidence(BaseModel):
+    id: str = Field(alias="_id", default_factory=lambda: str(uuid.uuid4()))
+    case_id: str
+    user_id: str
+    type: Literal["image", "audio", "video", "document"]
+    extracted_entities: dict = Field(default_factory=dict)
+    ocr_text: Optional[str] = None
+    deepfake_score: Optional[float] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class TimelineEvent(BaseModel):
+    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    case_id: str
+    time: str
+    description: str
+    source: str = "inferred"
+
+class LegalDraft(BaseModel):
+    draft_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    case_id: str
+    type: Literal["fir", "bank", "cybercrime"]
+    content: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class ScamPattern(BaseModel):
+    id: str = Field(alias="_id", default_factory=lambda: str(uuid.uuid4()))
+    pattern_text: str
+    scam_type: str
+    embedding: Optional[List[float]] = None
+    severity: str

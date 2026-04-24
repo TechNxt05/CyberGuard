@@ -12,7 +12,7 @@ interface EntityCardsProps {
 }
 
 export function EntityCards({ entities }: EntityCardsProps) {
-  const allEntities = [];
+  const allEntities: { type: string; value: string; icon: React.ReactNode }[] = [];
 
   if (entities?.upi_ids) entities.upi_ids.forEach(e => allEntities.push({ type: "UPI ID", value: e, icon: <CreditCard size={16} /> }));
   if (entities?.urls) entities.urls.forEach(e => allEntities.push({ type: "URL", value: e, icon: <Link size={16} /> }));

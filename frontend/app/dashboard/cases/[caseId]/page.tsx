@@ -112,7 +112,7 @@ export default function CaseInvestigationPage() {
         <div className="glass-card rounded-2xl p-6 border border-white/10">
           <div className="flex justify-between items-start mb-4">
             <h2 className="font-bold text-lg">Threat Analysis</h2>
-            <Button variant="outline" className="border-blue-500/50 hover:bg-blue-500/20 text-blue-400 text-xs h-8">
+            <Button variant="ghost" className="border border-blue-500/50 hover:bg-blue-500/20 text-blue-400 text-xs h-8">
               <Download size={14} className="mr-2" /> Export PDF
             </Button>
           </div>

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Add project root to sys.path to allow 'backend' imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from backend.app.schemas.common import AnalysisRequest, ScamAnalysisResult
@@ -54,11 +54,22 @@ def read_root():
     return {"status": "CyberGuardAI Platform Online", "auth": "Clerk Enabled", "db": "MongoDB Atlas"}
 
 # Import and include routers
-from backend.app.routers import analysis, evidence, scam_patterns, reports
+from backend.app.routers import analysis, evidence, scam_patterns, reports, investigate
 app.include_router(analysis.router)
 app.include_router(evidence.router)
 app.include_router(scam_patterns.router)
 app.include_router(reports.router)
+app.include_router(investigate.router)
+
+@app.get("/threat-feed")
+async def get_threat_feed():
+    return {
+        "status": "success",
+        "data": [
+            {"source": "CERT-In", "threat": "Phishing Campaign #882", "severity": "high"},
+            {"source": "Global Threat Intelligence", "threat": "Crypto-drainer nodes active", "severity": "medium"}
+        ]
+    }
 
 
 # ==========================================
@@ -429,9 +440,110 @@ def form_assistance_endpoint(req: FormAssistRequest):
     except Exception as e:
          raise HTTPException(status_code=500, detail=str(e))
 
+import asyncio
+
+@app.websocket("/ws/investigation/{session_id}")
+async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    try:
+        while True:
+            # Simple heartbeat to keep connection alive
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for session: {session_id}")
+
+import time
+
+# Simple in-memory cache
+_feed_cache: dict = {"data": None, "timestamp": 0}
+CACHE_TTL = 600  # 10 minutes
+
+STATIC_THREAT_FEED = [
+    {
+        "id": "tf-001",
+        "timestamp": "2 min ago",
+        "type": "UPI_FRAUD",
+        "severity": "HIGH",
+        "title": "Fake GPay refund portal active",
+        "detail": "New phishing domain gpay-refund-2024.xyz targeting Android users via WhatsApp",
+        "affectedPlatform": "Google Pay",
+        "reportCount": 47,
+        "region": "Mumbai, Delhi, Bangalore"
+    },
+    {
+        "id": "tf-002", 
+        "timestamp": "8 min ago",
+        "type": "PHISHING",
+        "severity": "CRITICAL",
+        "title": "SBI KYC SMS campaign detected",
+        "detail": "Spoofed sender ID 'SBI-Alert' sending bulk SMS with credential harvesting links",
+        "affectedPlatform": "SBI NetBanking",
+        "reportCount": 312,
+        "region": "Pan-India"
+    },
+    {
+        "id": "tf-003",
+        "timestamp": "15 min ago", 
+        "type": "SEXTORTION",
+        "severity": "MEDIUM",
+        "title": "Sextortion wave using LinkedIn breach data",
+        "detail": "Attackers using 2021 LinkedIn credentials to add credibility to threats. BTC demand: ₹1-3L",
+        "affectedPlatform": "Email",
+        "reportCount": 89,
+        "region": "Tier-1 cities"
+    },
+    {
+        "id": "tf-004",
+        "timestamp": "23 min ago",
+        "type": "INVESTMENT_FRAUD",
+        "severity": "HIGH", 
+        "title": "Fake trading app 'StockPro AI' on Play Store",
+        "detail": "App requests UPI permissions and drains linked accounts. 1200+ victims reported",
+        "affectedPlatform": "Android / UPI",
+        "reportCount": 1247,
+        "region": "Gujarat, Maharashtra, UP"
+    },
+    {
+        "id": "tf-005",
+        "timestamp": "31 min ago",
+        "type": "VISHING",
+        "severity": "HIGH",
+        "title": "Fake TRAI disconnection calls surge",
+        "detail": "Callers impersonating TRAI officers threatening number disconnection, demanding OTP",
+        "affectedPlatform": "Phone",
+        "reportCount": 203,
+        "region": "North India"
+    },
+    {
+        "id": "tf-006",
+        "timestamp": "44 min ago",
+        "type": "COURIER_FRAUD",
+        "severity": "MEDIUM",
+        "title": "FedEx customs scam targeting professionals",
+        "detail": "Victims told parcel contains contraband, threatened with arrest unless fee paid via crypto",
+        "affectedPlatform": "Phone / WhatsApp",
+        "reportCount": 156,
+        "region": "Bangalore, Hyderabad, Pune"
+    }
+]
+
+@app.get("/api/threat-feed")
+async def get_threat_feed():
+    now = time.time()
+    if _feed_cache["data"] and (now - _feed_cache["timestamp"]) < CACHE_TTL:
+        return _feed_cache["data"]
+    
+    _feed_cache["data"] = {"threats": STATIC_THREAT_FEED, "lastUpdated": "Live"}
+    _feed_cache["timestamp"] = now
+    return _feed_cache["data"]
+
+import datetime
+
 @app.get("/health")
 def health_check():
-    return {"status": "up", "db_connected": db.client is not None}
+    return {"status": "ok", "timestamp": datetime.datetime.utcnow().isoformat() + "Z", "db_connected": db.client is not None}
 
 if __name__ == "__main__":
     import uvicorn

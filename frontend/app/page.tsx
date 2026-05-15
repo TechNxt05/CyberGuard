@@ -5,7 +5,8 @@ import { Card } from "@/components/ui/card"
 import Link from "next/link"
 import { CYBER_CRIMES } from "@/lib/knowledge"
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/ui/button";
+import { demoCases } from "@/data/demo-cases";
 
 export default function Home() {
     return (
@@ -59,8 +60,44 @@ export default function Home() {
                     Real-time detection and expert resolution guidance.
                 </motion.p>
 
+                {/* Demo Cases Section */}
+                <div className="mb-16 mt-8">
+                    <div className="flex items-center justify-center gap-2 mb-6">
+                        <span className="h-px w-12 bg-white/10"></span>
+                        <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Try a live investigation</h2>
+                        <span className="h-px w-12 bg-white/10"></span>
+                    </div>
+                    <div className="grid md:grid-cols-3 gap-4 max-w-5xl mx-auto">
+                        {demoCases.map((demo) => {
+                            let borderColor = "border-blue-500/50";
+                            if (demo.urgency === "CRITICAL") borderColor = "border-red-500/50";
+                            if (demo.urgency === "HIGH") borderColor = "border-amber-500/50";
+
+                            return (
+                                <Link href={`/dashboard/cases/${demo.id}?demo=true`} key={demo.id}>
+                                    <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className="h-full">
+                                        <Card className={`h-full bg-black/40 backdrop-blur-sm border-l-4 ${borderColor} border-t-white/5 border-r-white/5 border-b-white/5 p-5 text-left hover:bg-white/5 transition-all cursor-pointer`}>
+                                            <div className="flex justify-between items-start mb-2">
+                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
+                                                    demo.urgency === "CRITICAL" ? "bg-red-500/10 text-red-400" :
+                                                    demo.urgency === "HIGH" ? "bg-amber-500/10 text-amber-400" :
+                                                    "bg-blue-500/10 text-blue-400"
+                                                }`}>
+                                                    {demo.urgency}
+                                                </span>
+                                                <span className="text-[10px] text-gray-500 font-mono">{demo.type.replace('_', ' ')}</span>
+                                            </div>
+                                            <h3 className="text-sm font-bold text-white mb-2">{demo.title}</h3>
+                                            <p className="text-xs text-gray-400 line-clamp-2">{demo.summary}</p>
+                                        </Card>
+                                    </motion.div>
+                                </Link>
+                            );
+                        })}
+                    </div>
+                </div>
+
                 {/* Modules */}
-                <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
                     <Link href="/scamshield" className="group">
                         <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                             <Card className="h-full border-blue-500/30 bg-gradient-to-br from-blue-500/10 to-transparent hover:border-blue-500/50 p-8 text-left transition-all">

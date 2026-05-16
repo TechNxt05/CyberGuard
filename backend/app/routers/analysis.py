@@ -43,7 +43,6 @@ async def analyze_video(file: UploadFile = File(...), user_id: str = Depends(get
 from backend.app.schemas.confidence import ConfidenceRequest, ConfidenceResponse
 import json
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.prompts import PromptTemplate
 from pydantic import ValidationError
 
 @router.post("/confidence", response_model=ConfidenceResponse)

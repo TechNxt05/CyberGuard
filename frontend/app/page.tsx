@@ -98,6 +98,7 @@ export default function Home() {
                 </div>
 
                 {/* Modules */}
+                <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
                     <Link href="/scamshield" className="group">
                         <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                             <Card className="h-full border-blue-500/30 bg-gradient-to-br from-blue-500/10 to-transparent hover:border-blue-500/50 p-8 text-left transition-all">

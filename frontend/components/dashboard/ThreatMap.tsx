@@ -41,7 +41,7 @@ const ThreatMap = () => {
           >
             <ZoomableGroup>
               <Geographies geography={INDIA_TOPO_URL}>
-                {({ geographies }) =>
+                {({ geographies }: { geographies: any[] }) =>
                   geographies.map(geo => (
                     <Geography
                       key={geo.rsmKey}

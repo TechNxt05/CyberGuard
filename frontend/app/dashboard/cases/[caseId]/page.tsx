@@ -260,7 +260,7 @@ export default function CaseInvestigationPage() {
             />
             <button 
               className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-all flex items-center justify-center shadow-lg shadow-blue-500/30"
-              onClick={handleSend}
+              onClick={() => handleSend()}
               disabled={isAnalyzing}
             >
               <Send size={18} />

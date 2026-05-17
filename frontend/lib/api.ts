@@ -73,3 +73,51 @@ export const getGraph = async (sessionId: string, incidentDescription: string) =
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ incidentDescription, extractedEntities: {} }),
   }).then(r => r.json());
+
+export interface AnalysisRequest {
+  message?: string;
+  image_base64?: string;
+  source?: string;
+}
+
+export interface IncidentRequest {
+  description: string;
+  user_context?: Record<string, string>;
+}
+
+export const checkScam = async (data: AnalysisRequest) => {
+  const res = await fetch(`${API_BASE}/analyze-message`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+};
+
+export const resolveIncident = async (data: IncidentRequest) => {
+  const res = await fetch(`${API_BASE}/resolve-incident`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+};
+
+export const solveDoubt = async (incidentId: string, question: string) => {
+  const res = await fetch(`${API_BASE}/case/doubt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ incident_id: incidentId, question }),
+  });
+  return res.json();
+};
+
+export const assistForm = async (incidentId: string, actionItem: string) => {
+  const res = await fetch(`${API_BASE}/case/form-assist`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ incident_id: incidentId, action_item: actionItem }),
+  });
+  return res.json();
+};
+

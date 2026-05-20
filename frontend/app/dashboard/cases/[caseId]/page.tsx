@@ -20,6 +20,7 @@ import ThreatMap from "@/components/dashboard/ThreatMap";
 import { Activity, GitBranch, Clock, Terminal, AlertTriangle, ShieldCheck } from "lucide-react";
 import jsPDF from "jspdf";
 import { runInvestigation, getConfidence, getTimeline, getGraph } from "@/lib/api";
+import { KnownThreatsPanel } from "@/components/KnownThreatsPanel";
 
 export default function CaseInvestigationPage() {
   const { caseId } = useParams();
@@ -32,6 +33,7 @@ export default function CaseInvestigationPage() {
   
   // Advanced Dashboard State
   const [confidenceData, setConfidenceData] = useState<any>(null);
+  const [knownThreats, setKnownThreats] = useState<any[]>([]);
   
   const [graphData, setGraphData] = useState({
     nodes: [
@@ -67,6 +69,21 @@ export default function CaseInvestigationPage() {
     // Demo Mode Logic
     if (isDemo && forcedInput) {
         setAgentActivity(prev => [{ id: Math.random().toString(), agent: "evidence", msg: "Analyzing visual patterns and OCR...", status: "loading", timestamp: new Date().toISOString() }, ...prev]);
+        
+        // Asynchronously run backend trigger to log demo case and check for existing threat entities
+        runInvestigation({
+            message: messageContent,
+            sessionId: sessionIdStr,
+            isDemoCase: true,
+            demoCaseId: caseId as string
+        }).then(result => {
+            if (result && result.known_threats) {
+                setKnownThreats(result.known_threats);
+            }
+        }).catch(err => {
+            console.error("Failed to persist demo case entities:", err);
+        });
+
         setTimeout(() => {
           setAgentActivity(prev => [{ id: Math.random().toString(), agent: "threat_intel", msg: "Cross-referencing Reddit & Twitter for similar scam patterns...", status: "loading", timestamp: new Date().toISOString() }, ...prev]);
           setConfidenceData({
@@ -116,6 +133,10 @@ export default function CaseInvestigationPage() {
             message: messageContent,
             sessionId: sessionIdStr
         });
+
+        if (result && result.known_threats) {
+            setKnownThreats(result.known_threats);
+        }
 
         // Trigger parallel detailed analyses
         const [confRes, timelineRes, graphRes] = await Promise.all([
@@ -275,6 +296,9 @@ export default function CaseInvestigationPage() {
         animate={{ opacity: 1, x: 0 }}
         className="flex-[1.8] flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar h-full"
       >
+        {/* Known Threat Alert Memory Panel */}
+        <KnownThreatsPanel threats={knownThreats} />
+
         {/* Intelligence Panel */}
         {confidenceData ? (
             <ConfidencePanel data={confidenceData} />

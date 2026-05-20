@@ -35,6 +35,14 @@ load_dotenv()
 async def lifespan(app: FastAPI):
     # Startup: Connect to MongoDB
     await db.connect()
+    try:
+        from backend.app.services.memory_service import ThreatMemoryService
+        if db.db is not None:
+            memory_service = ThreatMemoryService(db.db)
+            await memory_service.ensure_indexes()
+            print("Threat Memory indexes verified.")
+    except Exception as e:
+        print(f"Error initializing Threat Memory indexes: {e}")
     yield
     # Shutdown: Close connection
     await db.close()
@@ -54,12 +62,13 @@ def read_root():
     return {"status": "CyberGuardAI Platform Online", "auth": "Clerk Enabled", "db": "MongoDB Atlas"}
 
 # Import and include routers
-from backend.app.routers import analysis, evidence, scam_patterns, reports, investigate
+from backend.app.routers import analysis, evidence, scam_patterns, reports, investigate, memory
 app.include_router(analysis.router)
 app.include_router(evidence.router)
 app.include_router(scam_patterns.router)
 app.include_router(reports.router)
 app.include_router(investigate.router)
+app.include_router(memory.router)
 
 @app.get("/threat-feed")
 async def get_threat_feed():

@@ -57,20 +57,34 @@ A premium, cinematic dashboard designed for high-stakes intelligence operations.
 ---
 
 ## 🛠️ Tech Stack
-- **Frontend**: Next.js 15, TypeScript, TailwindCSS, Framer Motion, React Flow.
-- **Backend**: FastAPI, LangGraph Orchestration, Gemini 1.5 Pro/Flash, OpenAI.
-- **Data**: MongoDB Atlas (Incident Store), Redis (Task Queue).
-- **Intelligence**: Vision AI, Semantic Research (Reddit/Twitter/Web), Graph Reasoning.
+- **Frontend**: Next.js 16 (Turbopack), TypeScript, TailwindCSS, Framer Motion, React Flow.
+- **Backend**: FastAPI, LangGraph Swarm Orchestration, Gemini 1.5 Pro/Flash, OpenAI.
+- **Data & Memory**: MongoDB (Incident Store, Persistent Threat Intelligence Ledger).
+- **Intelligence**: Vision AI, Semantic Web Ingress (Swarm Search), Graph Reasoning, Longitudinal Memory.
+
+---
+
+## 🧠 Longitudinal Threat Memory Layer *(Phase 8 Upgrade)*
+CyberGuardAI now includes a high-fidelity **Longitudinal Persistent Memory Layer** designed to track repeat threat actors across different incident reports. 
+- **Automatic Extraction**: When an investigation is run, a Regex & AI pipeline parses all structural data including **UPI IDs**, **Phone Numbers**, **Fraudulent URLs**, **Cryptocurrency Wallets**, and **Emails**.
+- **Dynamic Risk Score Curves**: Threat indicators are saved in MongoDB with an occurrence ledger. As offenders appear repeatedly, their threat level escalates automatically:
+  - **1 Occurrence**: `Risk Score 30%` (Suspected Actor)
+  - **2 Occurrences**: `Risk Score 50%` (Escalated Risk)
+  - **3+ Occurrences**: `Risk Score 70% - 95%` (Escalated to **🔴 CONFIRMED THREAT**)
+- **Live SOC Alert Panel**: When repeat offenders are detected, a prominent, glowing red alert card appears at the top of the case console to immediately flag the repeat offender and prevent future damage.
+- **Dashboard Hub Widget**: Highlights global statistics across the platform (Total unique indicators, confirmed threats, and vector distribution) inside a premium glassmorphic grid.
 
 ---
 
 ## 🗺️ Roadmap
-- [x] Autonomous Investigation Workflows
-- [x] Investigation Graph Visualization
-- [x] Longitudinal Memory Foundation
-- [ ] Automated FIR & Bank Complaint PDF Generation
+- [x] Autonomous Multimodal Swarm Investigation
+- [x] React Flow Attack Graph Visualization
+- [x] Longitudinal Persistent Memory Layer (Repeat Offender Ledgers)
+- [x] Automated FIR & Legal Evidence PDF Generation
 - [ ] Real-time Browser Extension for Proactive Detection
 - [ ] Integration with Global Scam Wallet Feeds
+
+---
 
 ## 🏗️ Architecture
 
@@ -80,10 +94,13 @@ graph TD
         UI[Mission Control UI]
         Stream[Agent Activity Stream]
         Graph[Investigation Graph]
+        Stats[Memory Stats Widget]
+        Alerts[SOC Repeat Offender Alert]
     end
 
     subgraph API [FastAPI Backend]
         Router[API Routers]
+        MemRouter[Memory Router]
         WS[WebSocket Manager]
     end
 
@@ -102,6 +119,8 @@ graph TD
     end
 
     UI -->|REST| Router
+    Stats -->|Fetch Stats| MemRouter
+    Alerts -->|Check Hover / Matches| MemRouter
     Stream <-->|WebSocket| WS
     Router --> LangGraph
     WS --> LangGraph
@@ -115,6 +134,7 @@ graph TD
     Strategy --> Prev
     
     LangGraph --> Mongo
+    MemRouter --> Mongo
 ```
 
 ---
@@ -131,7 +151,45 @@ CyberGuardAI is heavily optimized for fast, accurate, and cost-effective investi
 
 ---
 
-## 💻 Local Setup Guide
+## 🐳 Docker Production Setup (One-Command Startup)
+
+CyberGuardAI is packaged with fully optimized Docker configurations, making the entire Next.js frontend, FastAPI backend, and MongoDB services bootable in a single command.
+
+### Prerequisites
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running.
+- A `.env` file in the project root containing your API keys (see `.env.example`).
+
+### Quick Start
+1. **Configure Environment Variables**
+   Make sure a `.env` file is active in the project root:
+   ```env
+   GEMINI_API_KEY=your_gemini_key
+   MONGODB_URI=your_mongodb_cluster_url
+   CLERK_PUBLISHABLE_KEY=your_clerk_publishable
+   CLERK_SECRET_KEY=your_clerk_secret
+   NEXT_PUBLIC_API_URL=http://localhost:8000
+   ```
+
+2. **Run Containers**
+   Build and start all services in detached mode:
+   ```bash
+   docker compose up --build -d
+   ```
+
+3. **Verify Health**
+   Docker-compose uses an embedded Python-based health check utility to verify that the backend API is fully responsive before starting the Next.js standalone container.
+   Check service status:
+   ```bash
+   docker compose ps
+   ```
+
+4. **Access Applications**
+   - **Frontend Dashboard**: [http://localhost:3000](http://localhost:3000)
+   - **Backend API & Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+## 💻 Manual Local Setup Guide (Without Docker)
 
 1. **Clone & Install Dependencies**
    ```bash
@@ -144,17 +202,7 @@ CyberGuardAI is heavily optimized for fast, accurate, and cost-effective investi
    npm install
    ```
 
-2. **Environment Configuration**
-   Copy `.env.example` to `.env` in the root directory and add your keys:
-   ```env
-   GEMINI_API_KEY=your_gemini_key
-   MONGODB_URI=your_mongodb_cluster_url
-   CLERK_PUBLISHABLE_KEY=your_clerk_publishable
-   CLERK_SECRET_KEY=your_clerk_secret
-   NEXT_PUBLIC_API_URL=http://localhost:8000
-   ```
-
-3. **Run the Services**
+2. **Run the Services**
    ```bash
    # Terminal 1: Start the Backend
    cd backend
@@ -164,9 +212,6 @@ CyberGuardAI is heavily optimized for fast, accurate, and cost-effective investi
    cd frontend
    npm run dev
    ```
-
-4. **Access the Platform**
-   Open `http://localhost:3000` in your browser. Click any of the pre-loaded **Demo Cases** on the home page to trigger an automated investigation.
 
 ---
 

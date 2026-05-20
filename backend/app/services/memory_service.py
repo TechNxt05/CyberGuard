@@ -1,27 +1,194 @@
-from typing import List, Dict, Any
-from backend.app.db.mongodb import db
+from datetime import datetime
+from typing import Optional
+from motor.motor_asyncio import AsyncIOMotorDatabase
+import re
 
-class MemoryService:
-    @staticmethod
-    async def find_linked_cases(entity_value: str) -> List[Dict[str, Any]]:
-        """
-        Searches historical cases for the same entity (wallet, phone, etc.).
-        """
-        # This assumes we have an 'entities' collection or indexed fields in cases
-        # For now, we simulate a match
-        cursor = db.get_collection("cases").find({"entities.value": entity_value})
-        results = await cursor.to_list(length=10)
-        return results
+class ThreatMemoryService:
+    """
+    Persistent memory layer for threat entities.
+    Stores and retrieves entity intelligence across investigation sessions.
+    """
 
-    @staticmethod
-    async def get_longitudinal_insights(case_id: str, entities: List[Dict[str, Any]]) -> List[str]:
+    def __init__(self, db: AsyncIOMotorDatabase):
+        self.collection = db["threat_entities"]
+
+    def _normalize(self, value: str) -> str:
+        """Normalize entity value for deduplication."""
+        return value.lower().strip()
+
+    def _compute_risk_score(self, occurrence_count: int) -> float:
+        """Risk score increases with occurrence count, caps at 1.0."""
+        # 1 occurrence = 0.3, 3 = 0.7, 5+ = 0.95
+        if occurrence_count == 1:
+            return 0.3
+        elif occurrence_count == 2:
+            return 0.5
+        elif occurrence_count == 3:
+            return 0.7
+        elif occurrence_count == 4:
+            return 0.85
+        else:
+            return min(0.95, 0.85 + (occurrence_count - 4) * 0.02)
+
+    async def ensure_indexes(self):
+        """Create indexes for threat_entities."""
+        await self.collection.create_index("entity_value_normalized")
+        await self.collection.create_index("entity_type")
+        # Compound index for fast deduplication checks
+        await self.collection.create_index([("entity_type", 1), ("entity_value_normalized", 1)], unique=True)
+
+    async def store_entities(
+        self,
+        entities: dict,  # {entity_type: [values]}
+        case_id: str,
+        crime_type: str
+    ) -> dict:
         """
-        Generates cross-case intelligence.
+        Store extracted entities from an investigation.
+        Returns count of new vs updated entities.
         """
-        insights = []
-        for entity in entities:
-            matches = await MemoryService.find_linked_cases(entity['value'])
-            if matches:
-                insights.append(f"Entity {entity['value']} was previously linked to {len(matches)} other incidents.")
-        
-        return insights
+        new_count = 0
+        updated_count = 0
+
+        for entity_type, values in entities.items():
+            if not values:
+                continue
+            for value in values:
+                if not value or not str(value).strip():
+                    continue
+
+                normalized = self._normalize(str(value))
+                now = datetime.utcnow()
+
+                # Check if entity already exists
+                existing = await self.collection.find_one({
+                    "entity_type": entity_type,
+                    "entity_value_normalized": normalized
+                })
+
+                if existing:
+                    # Update existing entity
+                    new_count_val = existing["occurrence_count"] + 1
+                    await self.collection.update_one(
+                        {"_id": existing["_id"]},
+                        {
+                            "$set": {
+                                "last_seen": now,
+                                "occurrence_count": new_count_val,
+                                "risk_score": self._compute_risk_score(new_count_val),
+                                "is_confirmed_threat": new_count_val >= 3
+                            },
+                            "$addToSet": {
+                                "case_ids": case_id,
+                                "crime_types": crime_type
+                            }
+                        }
+                    )
+                    updated_count += 1
+                else:
+                    # Insert new entity
+                    await self.collection.insert_one({
+                        "entity_type": entity_type,
+                        "entity_value": str(value),
+                        "entity_value_normalized": normalized,
+                        "first_seen": now,
+                        "last_seen": now,
+                        "occurrence_count": 1,
+                        "case_ids": [case_id],
+                        "crime_types": [crime_type],
+                        "risk_score": self._compute_risk_score(1),
+                        "is_confirmed_threat": False,
+                        "metadata": {}
+                    })
+                    new_count += 1
+
+        return {"new_entities": new_count, "updated_entities": updated_count}
+
+    async def check_entities(
+        self,
+        entities: dict  # {entity_type: [values]}
+    ) -> list[dict]:
+        """
+        Check if any provided entities are known threats.
+        Returns list of matches with their history.
+        Call this BEFORE running the full investigation pipeline
+        so the orchestrator knows about repeat offenders upfront.
+        """
+        matches = []
+
+        for entity_type, values in entities.items():
+            if not values:
+                continue
+            for value in values:
+                if not value:
+                    continue
+
+                normalized = self._normalize(str(value))
+                existing = await self.collection.find_one({
+                    "entity_type": entity_type,
+                    "entity_value_normalized": normalized
+                })
+
+                if existing:
+                    matches.append({
+                        "entity_type": entity_type,
+                        "entity_value": str(value),
+                        "occurrence_count": existing["occurrence_count"],
+                        "first_seen": existing["first_seen"].isoformat() if isinstance(existing["first_seen"], datetime) else str(existing["first_seen"]),
+                        "last_seen": existing["last_seen"].isoformat() if isinstance(existing["last_seen"], datetime) else str(existing["last_seen"]),
+                        "crime_types": existing["crime_types"],
+                        "risk_score": existing["risk_score"],
+                        "is_confirmed_threat": existing["is_confirmed_threat"],
+                        "case_count": len(existing["case_ids"])
+                    })
+
+        return sorted(matches, key=lambda x: x["risk_score"], reverse=True)
+
+    async def get_threat_stats(self) -> dict:
+        """Dashboard stats for the memory layer."""
+        total = await self.collection.count_documents({})
+        confirmed = await self.collection.count_documents(
+            {"is_confirmed_threat": True}
+        )
+        high_risk = await self.collection.count_documents(
+            {"risk_score": {"$gte": 0.7}}
+        )
+
+        # Top entity types
+        pipeline = [
+            {"$group": {"_id": "$entity_type", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}}
+        ]
+        type_breakdown = await self.collection.aggregate(pipeline).to_list(10)
+
+        # Map type_breakdown properly so it's JSON serializable
+        clean_breakdown = [{"type": item["_id"], "count": item["count"]} for item in type_breakdown]
+
+        return {
+            "total_tracked_entities": total,
+            "confirmed_threats": confirmed,
+            "high_risk_entities": high_risk,
+            "type_breakdown": clean_breakdown
+        }
+
+    async def get_recent_threats(self, limit: int = 20) -> list[dict]:
+        """Get recently seen threat entities for the intelligence feed."""
+        cursor = self.collection.find(
+            {"occurrence_count": {"$gte": 2}},
+            sort=[("last_seen", -1)],
+            limit=limit
+        )
+        results = await cursor.to_list(limit)
+
+        return [
+            {
+                "entity_type": r["entity_type"],
+                "entity_value": r["entity_value"],
+                "occurrence_count": r["occurrence_count"],
+                "last_seen": r["last_seen"].isoformat() if isinstance(r["last_seen"], datetime) else str(r["last_seen"]),
+                "crime_types": r["crime_types"],
+                "risk_score": r["risk_score"],
+                "is_confirmed_threat": r["is_confirmed_threat"]
+            }
+            for r in results
+        ]

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Plus, MessageSquare, Clock, ShieldAlert, Info } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { MemoryStats, MemoryStatsData } from "@/components/MemoryStats";
 
 interface Case {
     _id: string;
@@ -20,31 +21,57 @@ export default function Dashboard() {
     const [cases, setCases] = useState<Case[]>([]);
     const [loading, setLoading] = useState(true);
 
+    // Persistent memory stats state
+    const [stats, setStats] = useState<MemoryStatsData | null>(null);
+    const [statsLoading, setStatsLoading] = useState(true);
+
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [newCaseTitle, setNewCaseTitle] = useState("");
     const [creating, setCreating] = useState(false);
     const router = useRouter();
 
     useEffect(() => {
-        const fetchCases = async () => {
+        const fetchCasesAndStats = async () => {
             if (!isSignedIn) return;
             try {
                 const token = await getToken();
-                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/cases`, {
+                
+                // Fetch cases
+                const casesPromise = fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/cases`, {
                     headers: { Authorization: `Bearer ${token}` }
+                }).then(async (res) => {
+                    if (res.ok) {
+                        const data = await res.json();
+                        setCases(data);
+                    }
+                }).catch((err) => {
+                    console.error("Failed to fetch cases", err);
+                }).finally(() => {
+                    setLoading(false);
                 });
-                if (res.ok) {
-                    const data = await res.json();
-                    setCases(data);
-                }
+
+                // Fetch persistent memory stats
+                const statsPromise = fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/memory/stats`)
+                    .then(async (res) => {
+                        if (res.ok) {
+                            const data = await res.json();
+                            setStats(data);
+                        }
+                    }).catch((err) => {
+                        console.error("Failed to fetch memory stats", err);
+                    }).finally(() => {
+                        setStatsLoading(false);
+                    });
+
+                await Promise.all([casesPromise, statsPromise]);
             } catch (err) {
-                console.error("Failed to fetch cases", err);
-            } finally {
+                console.error("Failed in fetch operation", err);
                 setLoading(false);
+                setStatsLoading(false);
             }
         };
 
-        if (isLoaded) fetchCases();
+        if (isLoaded) fetchCasesAndStats();
     }, [isLoaded, isSignedIn, getToken]);
 
     const handleCreateCase = async () => {
@@ -120,6 +147,9 @@ export default function Dashboard() {
             </header>
 
             <main className="max-w-6xl mx-auto">
+                {/* Persistent Memory Layer Stats Widget */}
+                <MemoryStats stats={stats} loading={statsLoading} />
+
                 <div className="flex justify-between items-center mb-6">
                     <h2 className="text-xl font-semibold text-white">Your Cases</h2>
                     <Button onClick={() => setIsModalOpen(true)} className="bg-blue-600 hover:bg-blue-700">

@@ -20,6 +20,7 @@ export interface InvestigationResponse {
   recovery: any;
   authorityMap: any;
   prevention: any;
+  known_threats?: any[];
 }
 
 // Health check — used for cold-start detection

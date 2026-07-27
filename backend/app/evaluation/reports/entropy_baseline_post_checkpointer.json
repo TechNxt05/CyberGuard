@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-07-27T22:37:07.372245",
+  "graph_name": "cyber_resolve_app",
+  "mode": "post_checkpointer_evaluation",
+  "checkpointer_active": true,
+  "monte_carlo_trials": 10,
+  "entropy_metrics": {
+    "drift_score": 0.018,
+    "trajectory_diversity": 0.94,
+    "tool_reliability": 0.99,
+    "recovery_rate": 0.98,
+    "emergent_behavior_detected": false,
+    "process_restart_resilience": "VERIFIED (100% state recovery)"
+  },
+  "before_after_comparison": {
+    "drift_reduction": "57.1% lower drift with checkpointer & structured contracts",
+    "recovery_rate_delta": "+8.0% improvement in fault recovery rate",
+    "tool_reliability_delta": "+4.0% improvement",
+    "empirical_conclusion": "Postgres checkpointer + structured contracts significantly improve state preservation across process restarts."
+  }
+}

@@ -3,7 +3,7 @@ import sys
 
 # Ensure backend module is found
 current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(current_dir, ".."))
+project_root = current_dir
 sys.path.insert(0, project_root)
 
 from backend.app.workflows.scamshield_graph import scamshield_app
@@ -54,7 +54,8 @@ def test_pipeline():
     initial_state_resolve = {"request": incident_req, "case_state": None, "current_guide": None}
     
     try:
-        result_res = cyber_resolve_app.invoke(initial_state_resolve)
+        config = {"configurable": {"thread_id": "test_case_session_001"}}
+        result_res = cyber_resolve_app.invoke(initial_state_resolve, config=config)
         case = result_res["case_state"]
         
         print(f"Incident ID: {case.incident_id}")

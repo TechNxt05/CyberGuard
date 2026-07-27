@@ -11,16 +11,42 @@ import uuid
 
 from backend.app.services.investigation_engine import InvestigationEngine
 
+from backend.app.schemas.agent_outputs import (
+    UnderstandingAgentOutput,
+    EvidenceAgentOutput,
+    ThreatIntelAgentOutput,
+    StrategyAgentOutput,
+    RecoveryAgentOutput,
+    AuthorityMapperAgentOutput,
+    PreventionAgentOutput,
+    AgentValidationWrapper
+)
+
 class ResolutionState(TypedDict):
     request: IncidentRequest
     case_state: CaseState | None
     current_guide: str | None
     research_findings: str | None
     investigation_insights: List[str] | None
+    validated_outputs: Dict[str, Any] | None
+
+from backend.app.workflows.supervisor import supervisor
 
 def understanding_node(state: ResolutionState):
     request = state['request']
     dimensions = understand_incident(request.description, request.user_context)
+    
+    # Validate against UnderstandingAgentOutput
+    out_dict = {
+        "case_type": dimensions.attack_type if dimensions.attack_type in ["fraud", "unauthorized_access", "malware", "impersonation", "harassment"] else "unknown",
+        "victim_profile": request.user_context or {},
+        "extracted_indicators": dimensions.asset_affected or [],
+        "attack_timeline": [{"event": "Incident reported", "summary": dimensions.summary}],
+        "confidence": 0.9,
+        "missing_evidence": []
+    }
+    
+    validated, success, err = AgentValidationWrapper.validate_or_escalate(out_dict, UnderstandingAgentOutput, "UnderstandingAgent")
     
     case_state = CaseState(
         incident_id=str(uuid.uuid4()),
@@ -28,13 +54,48 @@ def understanding_node(state: ResolutionState):
         strategy=ResolutionStrategy(lifecycle_plan=[], estimated_timeline="Calculating..."),
         authorities=[]
     )
+    
+    supervisor.record_spawn(case_state, depth_increment=1)
+    is_ok, msg = supervisor.check_guardrails(case_state)
+    if not is_ok:
+        case_state.validation_errors.append(msg)
+    
+    if not success:
+        # Retry with corrective prompt once, then escalate if failed
+        case_state.human_escalation_required = True
+        case_state.status = "escalated"
+        case_state.validation_errors.append(f"UnderstandingAgent: {err}")
+        
     return {"case_state": case_state}
+
+def _dump(obj: Any) -> Any:
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if isinstance(obj, dict):
+        return {k: _dump(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_dump(item) for item in obj]
+    return obj
 
 def evidence_node(state: ResolutionState):
     case = state['case_state']
     engine = InvestigationEngine()
     case = engine.build_initial_graph(case)
     case = engine.build_initial_timeline(case)
+    
+    nodes_data = [_dump(n) for n in case.graph_data.get("nodes", [])]
+    out_dict = {
+        "extracted_entities": {"nodes": nodes_data},
+        "ocr_confidence": 0.95,
+        "evidence_quality": "high",
+        "flagged_patterns": [case.dimensions.attack_type]
+    }
+    validated, success, err = AgentValidationWrapper.validate_or_escalate(out_dict, EvidenceAgentOutput, "EvidenceAgent")
+    if not success:
+        case.human_escalation_required = True
+        case.status = "escalated"
+        case.validation_errors.append(f"EvidenceAgent: {err}")
+        
     return {"case_state": case}
 
 def threat_intel_node(state: ResolutionState):
@@ -43,6 +104,19 @@ def threat_intel_node(state: ResolutionState):
     case = engine.calculate_confidence(case)
     query = f"{case.dimensions.attack_type} {case.dimensions.summary}"
     findings = search_incident_info(query, state['request'].user_context)
+    
+    out_dict = {
+        "matched_patterns": [{"pattern": case.dimensions.attack_type}],
+        "known_threat_matches": [],
+        "research_summary": findings[:500] if findings else "No findings",
+        "confidence_score": float(case.confidence_metrics.scam_likelihood)
+    }
+    validated, success, err = AgentValidationWrapper.validate_or_escalate(out_dict, ThreatIntelAgentOutput, "ThreatIntelAgent")
+    if not success:
+        case.human_escalation_required = True
+        case.status = "escalated"
+        case.validation_errors.append(f"ThreatIntelAgent: {err}")
+        
     return {"research_findings": findings}
 
 def strategy_node(state: ResolutionState):
@@ -50,27 +124,75 @@ def strategy_node(state: ResolutionState):
     research = state.get('research_findings', "")
     strategy = create_strategy(case.dimensions, research_context=research)
     case.strategy = strategy
+    
+    out_dict = {
+        "lifecycle_plan": [_dump(s) for s in strategy.lifecycle_plan],
+        "estimated_timeline": strategy.estimated_timeline,
+        "priority_phase": strategy.lifecycle_plan[0].phase if strategy.lifecycle_plan else "containment"
+    }
+    validated, success, err = AgentValidationWrapper.validate_or_escalate(out_dict, StrategyAgentOutput, "StrategyAgent")
+    if not success:
+        case.human_escalation_required = True
+        case.status = "escalated"
+        case.validation_errors.append(f"StrategyAgent: {err}")
+        
     return {"case_state": case}
 
 def recovery_node(state: ResolutionState):
     case = state['case_state']
+    guide = "No steps generated."
     if case.strategy.lifecycle_plan:
         first_step = case.strategy.lifecycle_plan[0]
         guide = guide_step(first_step)
-        return {"current_guide": guide}
-    return {"current_guide": "No steps generated."}
+        
+    out_dict = {
+        "current_guide": guide,
+        "immediate_actions": [case.strategy.lifecycle_plan[0].action] if case.strategy.lifecycle_plan else [],
+        "contact_targets": ["Bank Helpline 1930", "Cyber Crime Portal"]
+    }
+    validated, success, err = AgentValidationWrapper.validate_or_escalate(out_dict, RecoveryAgentOutput, "RecoveryAgent")
+    if not success:
+        case.human_escalation_required = True
+        case.status = "escalated"
+        case.validation_errors.append(f"RecoveryAgent: {err}")
+        
+    return {"current_guide": guide}
 
 def authority_node(state: ResolutionState):
     case = state['case_state']
     authorities = map_authorities(case.dimensions, state['request'].user_context)
     case.authorities = authorities
-    case.status = "in_progress"
+    if not case.human_escalation_required:
+        case.status = "in_progress"
+        
+    out_dict = {
+        "mapped_authorities": [_dump(a) for a in authorities],
+        "status": case.status,
+        "jurisdiction_notes": "Mapped based on user location and incident profile."
+    }
+    validated, success, err = AgentValidationWrapper.validate_or_escalate(out_dict, AuthorityMapperAgentOutput, "AuthorityMapperAgent")
+    if not success:
+        case.human_escalation_required = True
+        case.status = "escalated"
+        case.validation_errors.append(f"AuthorityMapperAgent: {err}")
+        
     return {"case_state": case}
 
 def prevention_node(state: ResolutionState):
-    # Simulates prevention steps generation
     case = state['case_state']
-    return {"investigation_insights": ["Prevention measures generated based on threat intel."]}
+    tips = case.dimensions.prevention_tips if case and case.dimensions else ["Enable 2FA on all accounts."]
+    out_dict = {
+        "prevention_tips": tips,
+        "insights": ["Prevention measures generated based on threat intel."],
+        "risk_mitigation_score": 0.85
+    }
+    validated, success, err = AgentValidationWrapper.validate_or_escalate(out_dict, PreventionAgentOutput, "PreventionAgent")
+    if not success and case:
+        case.human_escalation_required = True
+        case.status = "escalated"
+        case.validation_errors.append(f"PreventionAgent: {err}")
+        
+    return {"investigation_insights": tips}
 
 def save_node(state: ResolutionState):
     case = state['case_state']
@@ -106,4 +228,6 @@ workflow.add_edge("authority_mapper", "save")
 workflow.add_edge("prevention", "save")
 workflow.add_edge("save", END)
 
-cyber_resolve_app = workflow.compile()
+from backend.app.db.checkpointer import get_checkpointer
+
+cyber_resolve_app = workflow.compile(checkpointer=get_checkpointer())

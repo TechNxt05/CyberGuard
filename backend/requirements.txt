@@ -24,3 +24,6 @@ sentence-transformers
 fpdf2
 pymongo
 python-multipart
+langgraph-checkpoint-postgres
+psycopg-pool
+entropy

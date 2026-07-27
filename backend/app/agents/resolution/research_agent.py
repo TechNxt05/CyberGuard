@@ -10,12 +10,30 @@ import praw
 import tweepy
 import concurrent.futures
 
-# Initialize Summarizer LLM (Default to Groq for speed/cost)
-llm = ChatGroq(
-    temperature=0, 
-    model_name="llama-3.3-70b-versatile",
-    api_key=os.getenv("GROQ_API_KEY")
-)
+# Initialize Summarizer LLM safely
+llm = None
+try:
+    groq_key = os.getenv("GROQ_API_KEY")
+    if groq_key:
+        llm = ChatGroq(
+            temperature=0, 
+            model_name="llama-3.3-70b-versatile",
+            api_key=groq_key
+        )
+except Exception as e:
+    print(f"Failed to init ChatGroq at top level: {e}")
+
+if llm is None:
+    try:
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        if gemini_key:
+            llm = ChatGoogleGenerativeAI(
+                google_api_key=gemini_key,
+                model="gemini-1.5-flash",
+                temperature=0
+            )
+    except Exception as e:
+        print(f"Failed to init ChatGoogleGenerativeAI fallback: {e}")
 
 def search_incident_info(query: str, context: Dict[str, Any] = None) -> str:
     """
@@ -88,36 +106,34 @@ def search_incident_info(query: str, context: Dict[str, Any] = None) -> str:
         
         Format as a clean, markdown report. NO generic fluff.
         """
-        response = llm.invoke([HumanMessage(content=summary_prompt)])
-        return response.content
+        if llm is not None:
+            response = llm.invoke([HumanMessage(content=summary_prompt)])
+            return response.content
+        return all_findings[:4000]
     except Exception as e:
         print(f"--- RESEARCH: Synthesis failed: {e} ---")
         return all_findings[:4000] # Fallback to raw data
 
+from backend.app.services.resilience import with_retry_and_circuit_breaker
+
+@with_retry_and_circuit_breaker("DuckDuckGo_Web", max_retries=2, backoff_base=0.5)
 def perform_web_search(query: str) -> str:
     """DuckDuckGo General Search"""
-    try:
-        results = []
-        with DDGS() as ddgs:
-            search_query = f"{query} scam review fraud check"
-            for r in ddgs.text(search_query, max_results=5):
-                results.append(f"- [WEB] {r['title']}: {r['body']} ({r['href']})")
-        return "\n".join(results) if results else "No specific web results."
-    except Exception as e:
-        return f"Web search error: {e}"
+    results = []
+    with DDGS() as ddgs:
+        search_query = f"{query} scam review fraud check"
+        for r in ddgs.text(search_query, max_results=5):
+            results.append(f"- [WEB] {r['title']}: {r['body']} ({r['href']})")
+    return "\n".join(results) if results else "No specific web results."
 
+@with_retry_and_circuit_breaker("DuckDuckGo_News", max_retries=2, backoff_base=0.5)
 def perform_news_search(query: str) -> str:
     """DuckDuckGo News Search"""
-    try:
-        results = []
-        with DDGS() as ddgs:
-            # removing 'scam' to get broader news if query is just entity name, 
-            # but usually query includes 'scam' if it's from the detector.
-            for r in ddgs.news(query, max_results=5): 
-                results.append(f"- [NEWS] {r['title']} ({r['source']}): {r['body']} ({r['url']})")
-        return "\n".join(results) if results else "No recent news articles found."
-    except Exception as e:
-        return f"News search error: {e}"
+    results = []
+    with DDGS() as ddgs:
+        for r in ddgs.news(query, max_results=5): 
+            results.append(f"- [NEWS] {r['title']} ({r['source']}): {r['body']} ({r['url']})")
+    return "\n".join(results) if results else "No recent news articles found."
 
 def perform_reddit_search(query: str) -> str:
     """PRAW -> Fallback to Site Search"""

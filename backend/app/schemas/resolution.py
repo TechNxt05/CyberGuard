@@ -63,7 +63,11 @@ class CaseState(BaseModel):
     timeline: List[TimelineEvent] = Field(default_factory=list)
     agent_traces: List[Dict[str, Any]] = Field(default_factory=list)
     current_step_index: int = 0
-    status: str = Field("open", description="Status: 'open', 'in_progress', 'resolved', 'stuck'")
+    human_escalation_required: bool = Field(False, description="Flagged if agent output validation fails after retries or guardrails trigger")
+    spawn_count: int = Field(0, description="Active subagent spawn count")
+    delegation_depth: int = Field(0, description="Current subagent delegation depth")
+    validation_errors: List[str] = Field(default_factory=list, description="Logged validation error messages")
+    status: str = Field("open", description="Status: 'open', 'in_progress', 'resolved', 'stuck', 'escalated'")
 
 class IncidentRequest(BaseModel):
     description: str = Field(..., description="User's natural language description of the incident")

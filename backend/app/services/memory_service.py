@@ -58,7 +58,22 @@ class ThreatMemoryService:
                     continue
 
                 normalized = self._normalize(str(value))
+                entity_id = f"{entity_type}_{normalized}"
                 now = datetime.utcnow()
+
+                # Build co-occurring entity connections for this investigation session
+                connected = []
+                for o_type, o_vals in entities.items():
+                    for o_val in o_vals:
+                        if not o_val: continue
+                        o_norm = self._normalize(str(o_val))
+                        o_id = f"{o_type}_{o_norm}"
+                        if o_id != entity_id:
+                            connected.append({
+                                "entity_id": o_id,
+                                "relationship": "used_in_same_case",
+                                "strength": 0.9
+                            })
 
                 # Check if entity already exists
                 existing = await self.collection.find_one({
@@ -67,27 +82,37 @@ class ThreatMemoryService:
                 })
 
                 if existing:
-                    # Update existing entity
-                    new_count_val = existing["occurrence_count"] + 1
+                    # Update existing entity in KG
+                    new_count_val = existing.get("occurrence_count", 1) + 1
+                    current_cases = existing.get("case_ids", [])
+                    if case_id not in current_cases:
+                        current_cases.append(case_id)
+                        
                     await self.collection.update_one(
                         {"_id": existing["_id"]},
                         {
                             "$set": {
+                                "entity_id": entity_id,
                                 "last_seen": now,
                                 "occurrence_count": new_count_val,
                                 "risk_score": self._compute_risk_score(new_count_val),
-                                "is_confirmed_threat": new_count_val >= 3
+                                "is_confirmed_threat": new_count_val >= 3,
+                                "victim_count": len(current_cases),
+                                "geographic_cluster": existing.get("geographic_cluster", "Mumbai/NCR")
                             },
                             "$addToSet": {
                                 "case_ids": case_id,
-                                "crime_types": crime_type
+                                "crime_types": crime_type,
+                                "connected_entities": {"$each": connected},
+                                "attack_campaigns": f"Campaign_{crime_type.upper()}"
                             }
                         }
                     )
                     updated_count += 1
                 else:
-                    # Insert new entity
+                    # Insert new KG entity
                     await self.collection.insert_one({
+                        "entity_id": entity_id,
                         "entity_type": entity_type,
                         "entity_value": str(value),
                         "entity_value_normalized": normalized,
@@ -98,6 +123,10 @@ class ThreatMemoryService:
                         "crime_types": [crime_type],
                         "risk_score": self._compute_risk_score(1),
                         "is_confirmed_threat": False,
+                        "connected_entities": connected,
+                        "attack_campaigns": [f"Campaign_{crime_type.upper()}"],
+                        "victim_count": 1,
+                        "geographic_cluster": "Mumbai/NCR",
                         "metadata": {}
                     })
                     new_count += 1

@@ -150,3 +150,14 @@ async def run_investigation(req: InvestigationRequest, db=Depends(get_db)):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/api/evaluation/swarm-metrics")
+async def get_swarm_evaluation_metrics():
+    from backend.app.evaluation.agent_evaluator import evaluator
+    sample_exec = {
+        "incident_id": str(uuid.uuid4()),
+        "description": "Suspicious WhatsApp message claiming lottery win requiring UPI payment",
+        "user_context": {"country": "India", "bank": "HDFC"}
+    }
+    return evaluator.evaluate_full_swarm(sample_exec)
+

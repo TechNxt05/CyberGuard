@@ -27,3 +27,4 @@ python-multipart
 langgraph-checkpoint-postgres
 psycopg-pool
 entropy
+setuptools

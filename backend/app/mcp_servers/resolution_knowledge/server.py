@@ -1,8 +1,18 @@
-from mcp.server.fastmcp import FastMCP
-from typing import List, Dict, Any
 import json
+from typing import List, Dict, Any
 
-mcp = FastMCP("ResolutionKnowledge")
+try:
+    from mcp.server.fastmcp import FastMCP
+    mcp = FastMCP("ResolutionKnowledge")
+except ImportError:
+    class DummyMCP:
+        def tool(self):
+            def decorator(func):
+                return func
+            return decorator
+        def run(self):
+            pass
+    mcp = DummyMCP()
 
 # Mock Knowledge Base (In production, this would be a real DB or detailed JSON file)
 PLAYBOOKS = {

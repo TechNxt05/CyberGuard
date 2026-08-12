@@ -1,11 +1,20 @@
-from mcp.server.fastmcp import FastMCP
-import faiss
-import numpy as np
-import pickle
 import os
+import pickle
+import numpy as np
+import faiss
 
-# Initialize FastMCP Scraper
-mcp = FastMCP("ScamKnowledge")
+try:
+    from mcp.server.fastmcp import FastMCP
+    mcp = FastMCP("ScamKnowledge")
+except ImportError:
+    class DummyMCP:
+        def tool(self):
+            def decorator(func):
+                return func
+            return decorator
+        def run(self):
+            pass
+    mcp = DummyMCP()
 
 # Mock embedding function for MVP (Replace with sentence-transformers or OpenAI later)
 def get_embedding(text: str):

@@ -8,7 +8,7 @@ langchain_groq
 pydantic
 faiss-cpu
 python-dotenv
-mcp
+mcp[cli]
 numpy
 scikit-learn
 requests

@@ -21,6 +21,46 @@ class CaseMessage(BaseModel):
     content: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
+CaseStatus = Literal[
+    "CREATED",
+    "INGESTING",
+    "INVESTIGATING",
+    "AWAITING_REVIEW",
+    "RECOVERY",
+    "AUTHORITY_ESCALATION",
+    "RESOLVED",
+    "CLOSED",
+    "ARCHIVED"
+]
+
+class InvestigationCase(BaseModel):
+    case_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    organization_id: str = "default_org"
+    project_id: str = "default_project"
+    title: str = "New Cyber Investigation"
+    description: str = ""
+    case_type: str = "financial_fraud"
+    status: CaseStatus = "CREATED"
+    priority: Literal["low", "medium", "high", "critical"] = "high"
+    severity: Literal["low", "medium", "high", "critical"] = "high"
+    financial_impact: float = 0.0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    current_phase: str = "intake"
+    current_objective: str = "Initial Evidence Ingestion & Case Understanding"
+    investigation_goal: str = "Identify threat actor, correlate evidence, and minimize financial loss"
+    active_hypotheses: List[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    risk_score: float = 0.0
+    assigned_users: List[str] = Field(default_factory=list)
+    evidence_count: int = 0
+    entity_count: int = 0
+    event_count: int = 0
+    recovery_status: str = "NOT_STARTED"
+    authority_status: str = "UNASSIGNED"
+    created_by: str = "system"
+    updated_by: str = "system"
+
 class Case(BaseModel):
     id: str = Field(alias="_id")
     user_id: str

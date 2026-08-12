@@ -31,6 +31,8 @@ class ResolutionState(TypedDict):
     validated_outputs: Dict[str, Any] | None
 
 from backend.app.workflows.supervisor import supervisor
+from backend.app.workflows.planner import planner
+from backend.app.schemas.case import InvestigationCase
 
 def understanding_node(state: ResolutionState):
     request = state['request']
@@ -52,8 +54,23 @@ def understanding_node(state: ResolutionState):
         incident_id=str(uuid.uuid4()),
         dimensions=dimensions,
         strategy=ResolutionStrategy(lifecycle_plan=[], estimated_timeline="Calculating..."),
-        authorities=[]
+        authorities=[],
+        status="INVESTIGATING"
     )
+    
+    # Create first-class InvestigationCase & initial task plan
+    inv_case = InvestigationCase(
+        case_id=case_state.incident_id,
+        title=f"Investigation: {dimensions.attack_type.upper()} - {dimensions.summary[:40]}",
+        description=request.description,
+        case_type=dimensions.attack_type,
+        status="INVESTIGATING",
+        priority="high" if dimensions.urgency in ["high", "critical"] else "medium",
+        severity=dimensions.urgency if dimensions.urgency in ["low", "medium", "high", "critical"] else "high"
+    )
+    
+    planned_tasks = planner.create_initial_plan(inv_case, request.description, request.user_context)
+    case_state.investigation_tasks = [t.model_dump(mode="json") for t in planned_tasks]
     
     supervisor.record_spawn(case_state, depth_increment=1)
     is_ok, msg = supervisor.check_guardrails(case_state)

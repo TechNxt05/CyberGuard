@@ -1,373 +1,375 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { useEffect } from "react";
-import { demoCases } from "@/data/demo-cases";
+import Link from "next/link";
+import { useAuth } from "@clerk/nextjs";
 import { motion } from "framer-motion";
-import { Send, Image as ImageIcon, FileText, UploadCloud, Download, ShieldAlert } from "lucide-react";
-import { ProbabilityMeter } from "@/components/ProbabilityMeter";
-import { EntityCards } from "@/components/EntityCards";
-import { InteractiveTimeline } from "@/components/InteractiveTimeline";
-import { Button } from "@/components/ui/button";
+import { Send, Image as ImageIcon, Download, ShieldCheck, GitBranch, Clock, X } from "lucide-react";
+import jsPDF from "jspdf";
 
+import { demoCases, DemoCase } from "@/data/demo-cases";
+import { Button } from "@/components/ui/button";
 import InvestigationGraph from "@/components/dashboard/InvestigationGraph";
 import IncidentTimeline from "@/components/dashboard/IncidentTimeline";
 import ConfidencePanel from "@/components/ConfidencePanel";
-import AgentActivityStream from "@/components/dashboard/AgentActivityStream";
+import AgentActivityStream, { AgentActivity } from "@/components/dashboard/AgentActivityStream";
 import ThreatIntelFeed from "@/components/dashboard/ThreatIntelFeed";
 import ThreatMap from "@/components/dashboard/ThreatMap";
-import { Activity, GitBranch, Clock, Terminal, AlertTriangle, ShieldCheck } from "lucide-react";
-import jsPDF from "jspdf";
-import { runInvestigation, getConfidence, getTimeline, getGraph } from "@/lib/api";
 import { KnownThreatsPanel } from "@/components/KnownThreatsPanel";
+import {
+  ApiError, ConfidenceData, GraphData, KnownThreat, MAX_IMAGE_BYTES, TimelineEventData,
+  checkKnownEntities, fileToBase64, getConfidence, getGraph, getTimeline, runInvestigation,
+} from "@/lib/api";
+
+const EMPTY_GRAPH: GraphData = {
+  nodes: [{ id: "n_victim", type: "victim", label: "Victim (You)" }],
+  edges: [],
+};
+
+const now = () => new Date().toISOString();
+let activitySeq = 0;
+const activity = (agent: string, msg: string, status: AgentActivity["status"]): AgentActivity => ({
+  id: `act-${++activitySeq}`, agent, msg, status, timestamp: now(),
+});
+
+/** Sample results for a demo case, derived only from that case's fixture. */
+function buildDemoResults(demo: DemoCase) {
+  const confidence: ConfidenceData = {
+    scamLikelihood: 95,
+    attackSophistication: demo.urgency === "CRITICAL" ? "HIGH" : "MEDIUM",
+    sophisticationScore: demo.urgency === "CRITICAL" ? 80 : 60,
+    recoveryProbability: demo.recoveryProbability,
+    urgencyLevel: demo.urgency,
+    urgencyReason: demo.evidence.description,
+    timeToAct: demo.type === "financial_fraud" ? "Call 1930 within the first hours for the best chance of freezing funds" : "Act today",
+    priorityActions: [
+      { action: "Report at cybercrime.gov.in or call 1930", deadline: "Immediately", impact: "CRITICAL" },
+      { action: "Preserve screenshots, messages and transaction IDs", deadline: "Today", impact: "HIGH" },
+    ],
+    riskFactors: demo.attackChain,
+    mitigatingFactors: [],
+  };
+  const nodes: GraphData["nodes"] = [
+    { id: "n_victim", type: "victim", label: "Victim (You)" },
+    { id: "n_threat", type: "threat_actor", label: "Attacker" },
+  ];
+  const edges: GraphData["edges"] = [{ id: "e_target", source: "n_threat", target: "n_victim", label: "targeted" }];
+  const nodeType: Record<string, string> = { upi_id: "wallet", wallet_address: "wallet", url: "url", email: "email", phone_number: "phone" };
+  Object.entries(demo.indicators).forEach(([type, values]) =>
+    values.forEach((value, i) => {
+      const id = `n_${type}_${i}`;
+      nodes.push({ id, type: nodeType[type] || "default", label: value });
+      edges.push({ id: `e_${id}`, source: "n_threat", target: id, label: type === "url" ? "operates" : "uses" });
+    }),
+  );
+  const timeline: TimelineEventData[] = demo.attackChain.map((step, i) => ({
+    id: `demo-t${i}`,
+    timestamp: "",
+    eventType: ["initial_access", "execution", "exfiltration", "impact"][Math.min(i, 3)],
+    description: step,
+    relativeTime: `Step ${i + 1}`,
+  }));
+  return { confidence, graph: { nodes, edges }, timeline };
+}
 
 export default function CaseInvestigationPage() {
-  const { caseId } = useParams();
+  const { caseId } = useParams<{ caseId: string }>();
   const searchParams = useSearchParams();
-  const isDemo = searchParams.get('demo') === 'true';
-  const [messages, setMessages] = useState<{role: string, content: string}[]>([{ role: "agent", content: "Hello. I am CyberGuard AI Investigator. I've initiated the autonomous investigation pipeline. Please upload any evidence (screenshots, phishing emails, bank transactions) or describe the incident." }]);
+  const { getToken, isSignedIn } = useAuth();
+  const demo = searchParams.get("demo") === "true" ? demoCases.find(c => c.id === caseId) : undefined;
+  const isDemo = Boolean(demo);
+
+  const [messages, setMessages] = useState<{ role: string; content: string }[]>([{
+    role: "agent",
+    content: isDemo
+      ? "Demo mode: this walkthrough uses sample data for the selected case. Sign in to investigate your own incident."
+      : "Describe the incident and attach any screenshot (phishing SMS, payment page, chat). I'll extract indicators, check them against past reports and map the attack.",
+  }]);
   const [input, setInput] = useState("");
+  const [image, setImage] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeTab, setActiveTab] = useState<"graph" | "timeline">("graph");
-  
-  // Advanced Dashboard State
-  const [confidenceData, setConfidenceData] = useState<any>(null);
-  const [knownThreats, setKnownThreats] = useState<any[]>([]);
-  
-  const [graphData, setGraphData] = useState({
-    nodes: [
-        { id: 'n_victim', type: 'victim', label: 'Victim (You)' },
-        { id: 'n_threat', type: 'threat_actor', label: 'Attacker' }
-    ],
-    edges: [
-        { id: 'e1', source: 'n_victim', target: 'n_threat', label: 'targeted_by' }
-    ]
-  });
-
-  const [timeline, setTimeline] = useState<any[]>([
-    { id: 't1', timestamp: new Date().toISOString(), eventType: "reconnaissance", description: "Case initialized in CyberGuard OS.", relativeTime: "T+0" }
-  ]);
-
-  const [agentActivity, setAgentActivity] = useState<any[]>([
-    { id: 'a1', agent: "understanding", msg: "Awaiting evidence ingestion...", status: "pending", timestamp: new Date().toISOString() }
-  ]);
-  
+  const [confidenceData, setConfidenceData] = useState<ConfidenceData | null>(null);
+  const [knownThreats, setKnownThreats] = useState<KnownThreat[]>([]);
+  const [graphData, setGraphData] = useState<GraphData>(EMPTY_GRAPH);
+  const [timeline, setTimeline] = useState<TimelineEventData[]>([]);
+  const [agentActivity, setAgentActivity] = useState<AgentActivity[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const demoStarted = useRef(false);
 
-  const handleSend = async (forcedInput?: string) => {
-    const messageContent = forcedInput || input;
-    if (!messageContent.trim() && !fileInputRef.current?.files?.length) return;
-    
-    setMessages(prev => [...prev, { role: "user", content: messageContent || "Uploaded evidence screenshot." }]);
+  const log = useCallback((a: AgentActivity) => setAgentActivity(prev => [a, ...prev].slice(0, 50)), []);
+  const say = (content: string) => setMessages(prev => [...prev, { role: "agent", content }]);
+
+  // ---- Demo: sample data only, plus a read-only lookup against real threat memory ----
+  useEffect(() => {
+    if (!demo || demoStarted.current) return;
+    demoStarted.current = true;
+    setMessages(prev => [...prev, { role: "user", content: demo.summary }]);
+    const results = buildDemoResults(demo);
+    setConfidenceData(results.confidence);
+    setGraphData(results.graph);
+    setTimeline(results.timeline);
+    log(activity("evidence", "Loaded sample evidence for this demo case.", "success"));
+    checkKnownEntities(demo.indicators)
+      .then(setKnownThreats)
+      .catch(() => log(activity("memory", "Threat memory lookup unavailable.", "error")));
+    say("Sample analysis loaded. The graph, timeline and assessment on the right are illustrative data for this demo case.");
+  }, [demo, log]);
+
+  const handleSelectImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return alert("Please choose an image file.");
+    if (file.size > MAX_IMAGE_BYTES) return alert("Image is too large (max 5 MB).");
+    setImage(file);
+  };
+
+  const clearImage = () => {
+    setImage(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // ---- Live investigation: real authenticated calls ----
+  const handleSend = async () => {
+    const text = input.trim();
+    if ((!text && !image) || isAnalyzing) return;
+    if (!isSignedIn) return say("Please sign in to run a live investigation.");
+
+    setMessages(prev => [...prev, { role: "user", content: text + (image ? `\n[Attached: ${image.name}]` : "") }]);
     setInput("");
     setIsAnalyzing(true);
-    
-    // Generate session ID
-    const sessionIdStr = caseId && caseId !== "new" ? (caseId as string) : `session-${Date.now()}`;
+    const attached = image;
+    clearImage();
 
-    // Demo Mode Logic
-    if (isDemo && forcedInput) {
-        setAgentActivity(prev => [{ id: Math.random().toString(), agent: "evidence", msg: "Analyzing visual patterns and OCR...", status: "loading", timestamp: new Date().toISOString() }, ...prev]);
-        
-        // Asynchronously run backend trigger to log demo case and check for existing threat entities
-        runInvestigation({
-            message: messageContent,
-            sessionId: sessionIdStr,
-            isDemoCase: true,
-            demoCaseId: caseId as string
-        }).then(result => {
-            if (result && result.known_threats) {
-                setKnownThreats(result.known_threats);
-            }
-        }).catch(err => {
-            console.error("Failed to persist demo case entities:", err);
-        });
-
-        setTimeout(() => {
-          setAgentActivity(prev => [{ id: Math.random().toString(), agent: "threat_intel", msg: "Cross-referencing Reddit & Twitter for similar scam patterns...", status: "loading", timestamp: new Date().toISOString() }, ...prev]);
-          setConfidenceData({
-            scamLikelihood: 92,
-            attackSophistication: "HIGH",
-            sophisticationScore: 85,
-            recoveryProbability: 45,
-            urgencyLevel: "CRITICAL",
-            urgencyReason: "Financial transactions within last 48 hours — reversal window still open",
-            timeToAct: "Act within 6 hours for best recovery outcome",
-            priorityActions: [
-              { action: "File cybercrime complaint at cybercrime.gov.in", deadline: "Immediately", impact: "HIGH" },
-              { action: "Contact bank fraud helpline 1930", deadline: "Within 2 hours", impact: "CRITICAL" }
-            ],
-            riskFactors: ["Recent transaction"],
-            mitigatingFactors: ["Within 48hr window"]
-          });
-          setGraphData(prev => ({
-            nodes: [
-                ...prev.nodes,
-                { id: 'n_upi', type: 'wallet', label: 'UPI: scammer@ybl' },
-                { id: 'n_url', type: 'url', label: 'http://login-sbi-update.xyz' }
-            ],
-            edges: [
-                ...prev.edges,
-                { id: 'e2', source: 'n_threat', target: 'n_upi', label: 'receives_funds' },
-                { id: 'e3', source: 'n_threat', target: 'n_url', label: 'operates' }
-            ]
-          }));
-          setTimeline(prev => [
-            ...prev,
-            { id: 't2', timestamp: new Date().toISOString(), eventType: "exfiltration", description: "Extracted fraudulent UPI handle and phishing URL.", relativeTime: "T+3 mins", impact: "High risk of fund loss" }
-          ]);
-          setMessages(prev => [...prev, { role: "agent", content: "Investigation complete. I've mapped the attack chain. This is a highly sophisticated phishing attempt targeting bank credentials. Recovery workflows have been generated." }]);
-          setIsAnalyzing(false);
-          setAgentActivity(prev => [{ id: Math.random().toString(), agent: "strategy", msg: "Response plan generated. Immediate bank notification required.", status: "success", timestamp: new Date().toISOString() }, ...prev]);
-        }, 3000);
-        return;
-    }
-
-    // LIVE AI MODE
-    setAgentActivity([{ id: 'init', agent: "understanding", msg: "Initiating live parallel investigation...", status: "loading", timestamp: new Date().toISOString() }]);
-    
     try {
-        // Run main investigation
-        const result = await runInvestigation({
-            message: messageContent,
-            sessionId: sessionIdStr
-        });
+      const token = await getToken();
+      log(activity("evidence", attached ? "Reading screenshot and extracting indicators..." : "Extracting indicators...", "loading"));
+      const result = await runInvestigation({
+        message: text,
+        sessionId: caseId,
+        ...(attached ? { imageBase64: await fileToBase64(attached), imageMimeType: attached.type } : {}),
+      }, token);
+      const found = Object.values(result.extracted_entities).flat().length;
+      log(activity("evidence", `Found ${found} indicator(s).`, "success"));
+      setKnownThreats(result.known_threats);
+      if (result.known_threats.length) log(activity("memory", `${result.known_threats.length} indicator(s) seen in earlier reports.`, "success"));
 
-        if (result && result.known_threats) {
-            setKnownThreats(result.known_threats);
-        }
+      const description = [text, result.image_text].filter(Boolean).join("\n\n");
+      log(activity("threat_intel", "Assessing threat, timeline and relationships...", "loading"));
+      const [conf, tl, graph] = await Promise.allSettled([
+        getConfidence(description, result.extracted_entities, token),
+        getTimeline(description, token),
+        getGraph(description, result.extracted_entities, token),
+      ]);
+      if (conf.status === "fulfilled") setConfidenceData(conf.value);
+      if (tl.status === "fulfilled") setTimeline(tl.value.events);
+      if (graph.status === "fulfilled" && graph.value.nodes.length) setGraphData(graph.value);
 
-        // Trigger parallel detailed analyses
-        const [confRes, timelineRes, graphRes] = await Promise.all([
-            getConfidence(sessionIdStr, messageContent).catch(() => null),
-            getTimeline(sessionIdStr, messageContent).catch(() => null),
-            getGraph(sessionIdStr, messageContent).catch(() => null)
-        ]);
-
-        if (confRes) setConfidenceData(confRes);
-        if (timelineRes?.events) setTimeline(timelineRes.events);
-        if (graphRes?.nodes) setGraphData(graphRes);
-        
-        setMessages(prev => [...prev, { role: "agent", content: "Live investigation complete. The swarm has mapped out the threat vectors and updated the dashboard." }]);
+      const failed = [conf, tl, graph].filter(r => r.status === "rejected").length;
+      log(activity("strategy", failed ? `${3 - failed}/3 analyses completed (the AI service may be busy).` : "Analysis complete.", failed ? "error" : "success"));
+      say(failed
+        ? "Partial results are on the right. Some analyses failed - please retry in a minute."
+        : "Analysis complete. Review the assessment, priority actions, graph and timeline on the right.");
     } catch (err) {
-        console.error(err);
-        setMessages(prev => [...prev, { role: "agent", content: "Investigation encountered an error connecting to the AI models." }]);
+      const msg = err instanceof ApiError ? err.message : "Could not reach the server.";
+      log(activity("understanding", msg, "error"));
+      say(`Investigation failed: ${msg}`);
     } finally {
-        setIsAnalyzing(false);
+      setIsAnalyzing(false);
     }
   };
 
   const handleExportPDF = () => {
     const doc = new jsPDF();
-    
-    doc.setFontSize(22);
-    doc.setTextColor(59, 130, 246);
-    doc.text("CyberGuardAI OS - Official Evidence Report", 20, 20);
-    
-    doc.setFontSize(12);
-    doc.setTextColor(50, 50, 50);
-    doc.text(`Case ID: ${caseId}`, 20, 35);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, 20, 42);
-    
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const width = doc.internal.pageSize.getWidth() - 40;
+    let y = 20;
+    const write = (text: string, size = 10, gap = 2) => {
+      doc.setFontSize(size);
+      // jsPDF's built-in fonts can't render ₹ and similar glyphs.
+      const lines = doc.splitTextToSize(text.replace(/₹/g, "Rs. ").replace(/[^\x00-\xFF]/g, "?"), width);
+      lines.forEach((line: string) => {
+        if (y > pageHeight - 15) { doc.addPage(); y = 20; }
+        doc.text(line, 20, y);
+        y += size * 0.5;
+      });
+      y += gap;
+    };
+
+    write("CyberGuard Investigation Summary", 18, 4);
+    write(`Case: ${caseId}${isDemo ? " (DEMO - sample data)" : ""}`);
+    write(`Generated: ${new Date().toLocaleString()}`, 10, 6);
     if (confidenceData) {
-        doc.setFontSize(16);
-        doc.setTextColor(0, 0, 0);
-        doc.text("Threat Assessment", 20, 60);
-        
-        doc.setFontSize(11);
-        doc.text(`Scam Likelihood: ${confidenceData.scamLikelihood}%`, 20, 70);
-        doc.text(`Urgency Level: ${confidenceData.urgencyLevel}`, 20, 77);
-        doc.text(`Attack Sophistication: ${confidenceData.attackSophistication}`, 20, 84);
-        doc.text(`Recovery Probability: ${confidenceData.recoveryProbability}%`, 20, 91);
-        
-        doc.setFontSize(14);
-        doc.text("Priority Actions", 20, 110);
-        confidenceData.priorityActions.forEach((act: any, idx: number) => {
-            doc.setFontSize(10);
-            doc.text(`${idx + 1}. ${act.action} (Deadline: ${act.deadline}) - Impact: ${act.impact}`, 20, 120 + (idx * 8));
-        });
+      write("Threat Assessment", 14);
+      write(`Scam likelihood: ${confidenceData.scamLikelihood}%  |  Urgency: ${confidenceData.urgencyLevel}  |  Sophistication: ${confidenceData.attackSophistication}`);
+      write(`Recovery probability (estimate): ${confidenceData.recoveryProbability}%`, 10, 4);
+      write("Priority Actions", 14);
+      (confidenceData.priorityActions || []).forEach((a, i) => write(`${i + 1}. ${a.action} (Deadline: ${a.deadline}, Impact: ${a.impact})`));
+      y += 4;
     }
-    
-    doc.setFontSize(16);
-    doc.text("Investigation Timeline", 20, 150);
-    timeline.forEach((ev: any, idx: number) => {
-        doc.setFontSize(10);
-        doc.text(`[${new Date(ev.timestamp).toLocaleTimeString()}] ${ev.eventType.toUpperCase()} - ${ev.description}`, 20, 160 + (idx * 8));
-    });
-    
-    doc.save(`CyberGuard_Evidence_${caseId}.pdf`);
+    if (knownThreats.length) {
+      write("Indicators Seen in Earlier Reports", 14);
+      knownThreats.forEach(t => write(`- ${t.entity_type}: ${t.entity_value} (${t.case_count} case(s), risk ${Math.round(t.risk_score * 100)}%)`));
+      y += 4;
+    }
+    if (timeline.length) {
+      write("Incident Timeline", 14);
+      timeline.forEach(ev => write(`[${ev.relativeTime || ev.timestamp || "-"}] ${ev.eventType.toUpperCase()} - ${ev.description}`));
+    }
+    doc.save(`CyberGuard_Investigation_${caseId}.pdf`);
   };
 
-  useEffect(() => {
-    if (isDemo) {
-        const demoData = demoCases.find(c => c.id === caseId);
-        if (demoData) {
-            setTimeout(() => {
-                handleSend(demoData.summary);
-            }, 500);
-        }
-    }
-  }, [isDemo, caseId]);
+  const priorityActions = confidenceData?.priorityActions || [];
 
   return (
     <div className="flex h-[calc(100vh-64px)] w-full max-w-[1800px] mx-auto p-4 gap-4 bg-[#020617] overflow-hidden">
-      {/* FAR LEFT PANEL: Threat Feed */}
       <div className="hidden lg:flex w-72 flex-col">
-          <ThreatIntelFeed />
+        <ThreatIntelFeed />
       </div>
 
-      {/* CENTER PANEL: Chat & Investigation Console */}
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         className="flex-[1.2] flex flex-col glass-card rounded-2xl overflow-hidden border border-white/5 bg-black/40 backdrop-blur-xl h-full"
       >
-        <div className="p-4 border-b border-white/5 bg-slate-900/30 flex justify-between items-center relative">
+        <div className="p-4 border-b border-white/5 bg-slate-900/30 flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-            <h2 className="font-bold text-sm tracking-widest uppercase flex items-center gap-2">Investigation Console</h2>
+            <div className="w-2 h-2 rounded-full bg-blue-500" />
+            <h2 className="font-bold text-sm tracking-widest uppercase">Investigation Console</h2>
           </div>
-          <div className="flex items-center gap-3">
-              {isDemo && (
-                  <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest animate-pulse">
-                      Demo Mode
-                  </span>
-              )}
-              <span className="text-[10px] text-gray-500 font-mono">NODE: OS-ALPHA-7 // {caseId}</span>
-          </div>
+          {isDemo && (
+            <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest">
+              Demo · sample data
+            </span>
+          )}
         </div>
-        
-        {/* Chat Area */}
+
         <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
           {messages.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] rounded-2xl p-4 text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm shadow-lg shadow-blue-500/20' : 'bg-slate-900/80 border border-white/10 text-gray-200 rounded-tl-sm'}`}>
+            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[85%] rounded-2xl p-4 text-sm leading-relaxed whitespace-pre-wrap ${msg.role === "user" ? "bg-blue-600 text-white rounded-tr-sm" : "bg-slate-900/80 border border-white/10 text-gray-200 rounded-tl-sm"}`}>
                 {msg.content}
               </div>
             </div>
           ))}
           {isAnalyzing && (
             <div className="flex justify-start">
-              <div className="bg-slate-900/80 border border-white/10 text-blue-400 rounded-2xl rounded-tl-sm p-4 flex items-center gap-3 shadow-lg shadow-blue-500/10">
-                <div className="flex gap-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '200ms' }} />
-                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '400ms' }} />
-                </div>
-                <span className="text-xs font-bold uppercase tracking-widest">Multi-Agent Ingress...</span>
+              <div className="bg-slate-900/80 border border-white/10 text-blue-400 rounded-2xl rounded-tl-sm p-4 text-xs font-bold uppercase tracking-widest">
+                Analyzing...
               </div>
             </div>
           )}
+          {isDemo && (
+            <div className="text-center pt-2">
+              <Link href="/dashboard" className="text-xs text-blue-400 hover:underline">Sign in to investigate your own incident →</Link>
+            </div>
+          )}
         </div>
-        
-        {/* Agent Activity Mini-Stream */}
-        <AgentActivityStream sessionId={caseId as string} fallbackActivities={agentActivity} />
 
-        {/* Input Area */}
-        <div className="p-4 bg-black/60 border-t border-white/5 backdrop-blur-md">
-          <div className="flex items-center gap-2 bg-slate-950/50 rounded-xl border border-white/5 p-2 pr-4 focus-within:border-blue-500/50 transition-all shadow-inner">
-            <button className="p-2 text-gray-500 hover:text-blue-400 transition-colors" onClick={() => fileInputRef.current?.click()}>
-              <ImageIcon size={20} />
-            </button>
-            <input type="file" className="hidden" ref={fileInputRef} />
-            <input 
-              type="text" 
-              className="flex-1 bg-transparent border-none outline-none text-white text-sm px-2"
-              placeholder="Describe incident or upload evidence..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            />
-            <button 
-              className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-all flex items-center justify-center shadow-lg shadow-blue-500/30"
-              onClick={() => handleSend()}
-              disabled={isAnalyzing}
-            >
-              <Send size={18} />
-            </button>
+        <AgentActivityStream activities={agentActivity} />
+
+        {!isDemo && (
+          <div className="p-4 bg-black/60 border-t border-white/5 backdrop-blur-md">
+            {image && (
+              <div className="flex items-center gap-2 mb-2 text-xs text-gray-300">
+                <ImageIcon size={14} /> {image.name}
+                <button onClick={clearImage} aria-label="Remove attachment" className="text-gray-500 hover:text-white"><X size={14} /></button>
+              </div>
+            )}
+            <div className="flex items-center gap-2 bg-slate-950/50 rounded-xl border border-white/5 p-2 pr-4 focus-within:border-blue-500/50 transition-all">
+              <button className="p-2 text-gray-500 hover:text-blue-400 transition-colors" onClick={() => fileInputRef.current?.click()} aria-label="Attach screenshot">
+                <ImageIcon size={20} />
+              </button>
+              <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleSelectImage} />
+              <input
+                type="text"
+                className="flex-1 bg-transparent border-none outline-none text-white text-sm px-2"
+                placeholder="Describe the incident or attach a screenshot..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              />
+              <button
+                className="p-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg transition-all"
+                onClick={handleSend}
+                disabled={isAnalyzing}
+                aria-label="Send"
+              >
+                <Send size={18} />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </motion.div>
 
-      {/* RIGHT PANEL: Mission Control Dashboard */}
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
         className="flex-[1.8] flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar h-full"
       >
-        {/* Known Threat Alert Memory Panel */}
         <KnownThreatsPanel threats={knownThreats} />
 
-        {/* Intelligence Panel */}
         {confidenceData ? (
-            <ConfidencePanel data={confidenceData} />
+          <ConfidencePanel data={confidenceData} />
         ) : (
-            <div className="flex flex-col gap-4 p-5 rounded-2xl glass-card bg-black/40 border border-white/5 animate-pulse min-h-[300px]">
-                <div className="h-4 bg-white/10 rounded w-1/3 mb-4"></div>
-                <div className="h-8 bg-white/5 rounded w-full mb-2"></div>
-                <div className="h-8 bg-white/5 rounded w-full mb-2"></div>
-                <div className="h-16 bg-white/5 rounded w-full mt-4"></div>
-            </div>
+          <div className="flex items-center justify-center p-5 rounded-2xl bg-black/40 border border-white/5 min-h-[160px] text-xs text-gray-500">
+            The threat assessment appears here after an investigation.
+          </div>
         )}
 
-        {/* Graph / Timeline Tabs */}
         <div className="flex-1 flex flex-col min-h-[500px]">
-             <div className="flex gap-1 p-1 bg-black/40 rounded-lg border border-white/5 self-start mb-4">
-                <button 
-                    onClick={() => setActiveTab("graph")}
-                    className={`px-4 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === 'graph' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                    <GitBranch size={12} className="inline mr-2" />
-                    Investigation Graph
-                </button>
-                <button 
-                    onClick={() => setActiveTab("timeline")}
-                    className={`px-4 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === 'timeline' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                    <Clock size={12} className="inline mr-2" />
-                    Incident Timeline
-                </button>
-            </div>
-
-            <div className="flex-1">
-                {activeTab === 'graph' ? (
-                    <InvestigationGraph data={graphData} />
-                ) : (
-                    <div className="glass-card rounded-2xl p-6 border border-white/5 bg-black/20 backdrop-blur-md min-h-[400px]">
-                        <IncidentTimeline events={timeline} />
-                    </div>
-                )}
-            </div>
+          <div className="flex gap-1 p-1 bg-black/40 rounded-lg border border-white/5 self-start mb-4">
+            {(["graph", "timeline"] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-4 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === tab ? "bg-blue-600 text-white" : "text-gray-500 hover:text-gray-300"}`}
+              >
+                {tab === "graph" ? <GitBranch size={12} className="inline mr-2" /> : <Clock size={12} className="inline mr-2" />}
+                {tab === "graph" ? "Investigation Graph" : "Incident Timeline"}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1">
+            {activeTab === "graph" ? (
+              <InvestigationGraph data={graphData} />
+            ) : (
+              <div className="glass-card rounded-2xl p-6 border border-white/5 bg-black/20 min-h-[400px]">
+                {timeline.length ? <IncidentTimeline events={timeline} /> : <p className="text-xs text-gray-500">No timeline yet.</p>}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Recovery Actions (Simplified Placeholder) */}
-        <div className="glass-card rounded-2xl p-5 border border-white/5 bg-blue-500/5 backdrop-blur-md mb-6">
-             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-4">
-                <div className="flex items-center gap-2">
-                    <ShieldCheck size={18} className="text-blue-500" />
-                    <h3 className="text-xs font-bold uppercase tracking-widest text-blue-400">Recovery Workflow</h3>
-                </div>
-                <Button 
-                    onClick={handleExportPDF}
-                    className="h-8 text-[10px] font-bold uppercase tracking-widest bg-blue-600 hover:bg-blue-500"
-                >
-                    <Download size={14} className="mr-2" /> Export Legal Evidence
-                </Button>
-             </div>
-             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                 {["Freeze Bank Account", "Report to Portal", "Generate FIR Draft", "Notify Contacts"].map((action, i) => (
-                     <div key={i} className="p-3 rounded-lg border border-white/5 bg-white/[0.02] flex items-center justify-between hover:bg-white/[0.05] cursor-pointer transition-colors group">
-                        <span className="text-xs font-medium text-gray-300">{action}</span>
-                        <div className="w-4 h-4 rounded border border-blue-500/30 group-hover:bg-blue-500/20 transition-colors" />
-                     </div>
-                 ))}
-             </div>
+        <div className="glass-card rounded-2xl p-5 border border-white/5 bg-blue-500/5 mb-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-4">
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={18} className="text-blue-500" />
+              <h3 className="text-xs font-bold uppercase tracking-widest text-blue-400">Priority Actions</h3>
+            </div>
+            <Button onClick={handleExportPDF} disabled={!confidenceData && !timeline.length} className="h-8 text-[10px] font-bold uppercase tracking-widest bg-blue-600 hover:bg-blue-500">
+              <Download size={14} className="mr-2" /> Export Summary PDF
+            </Button>
+          </div>
+          {priorityActions.length ? (
+            <ol className="space-y-2">
+              {priorityActions.map((a, i) => (
+                <li key={i} className="p-3 rounded-lg border border-white/5 bg-white/[0.02] text-xs text-gray-300 flex justify-between gap-3">
+                  <span>{i + 1}. {a.action}</span>
+                  <span className="text-gray-500 shrink-0">{a.deadline}</span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-xs text-gray-500">
+              Run an investigation to get prioritised actions. For financial fraud in India, call <a href="tel:1930" className="text-blue-400">1930</a> immediately and report at{" "}
+              <a href="https://cybercrime.gov.in" target="_blank" rel="noopener noreferrer" className="text-blue-400">cybercrime.gov.in</a>.
+            </p>
+          )}
         </div>
 
-        {/* GEOSPATIAL THREAT MAP */}
         <ThreatMap />
-        
       </motion.div>
     </div>
   );

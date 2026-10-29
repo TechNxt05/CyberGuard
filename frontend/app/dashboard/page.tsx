@@ -7,6 +7,7 @@ import { Plus, MessageSquare, Clock, ShieldAlert, Info } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MemoryStats, MemoryStatsData } from "@/components/MemoryStats";
+import { apiFetch } from "@/lib/api";
 
 interface Case {
     _id: string;
@@ -20,6 +21,7 @@ export default function Dashboard() {
     const { getToken, isLoaded, isSignedIn } = useAuth();
     const [cases, setCases] = useState<Case[]>([]);
     const [loading, setLoading] = useState(true);
+    const [casesError, setCasesError] = useState(false);
 
     // Persistent memory stats state
     const [stats, setStats] = useState<MemoryStatsData | null>(null);
@@ -33,42 +35,17 @@ export default function Dashboard() {
     useEffect(() => {
         const fetchCasesAndStats = async () => {
             if (!isSignedIn) return;
-            try {
-                const token = await getToken();
-                
-                // Fetch cases
-                const casesPromise = fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/cases`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                }).then(async (res) => {
-                    if (res.ok) {
-                        const data = await res.json();
-                        setCases(data);
-                    }
-                }).catch((err) => {
-                    console.error("Failed to fetch cases", err);
-                }).finally(() => {
-                    setLoading(false);
-                });
-
-                // Fetch persistent memory stats
-                const statsPromise = fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/memory/stats`)
-                    .then(async (res) => {
-                        if (res.ok) {
-                            const data = await res.json();
-                            setStats(data);
-                        }
-                    }).catch((err) => {
-                        console.error("Failed to fetch memory stats", err);
-                    }).finally(() => {
-                        setStatsLoading(false);
-                    });
-
-                await Promise.all([casesPromise, statsPromise]);
-            } catch (err) {
-                console.error("Failed in fetch operation", err);
-                setLoading(false);
-                setStatsLoading(false);
-            }
+            const token = await getToken();
+            await Promise.all([
+                apiFetch<Case[]>("/cases", { token })
+                    .then(setCases)
+                    .catch(() => setCasesError(true))
+                    .finally(() => setLoading(false)),
+                apiFetch<MemoryStatsData>("/api/memory/stats")
+                    .then(setStats)
+                    .catch(() => setStats(null))
+                    .finally(() => setStatsLoading(false)),
+            ]);
         };
 
         if (isLoaded) fetchCasesAndStats();
@@ -78,18 +55,14 @@ export default function Dashboard() {
         if (!newCaseTitle) return;
         setCreating(true);
         try {
-            const token = await getToken();
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/cases?title=${encodeURIComponent(newCaseTitle)}&summary=${encodeURIComponent("Pending analysis...")}`, {
+            const data = await apiFetch<{ case_id: string }>("/cases", {
                 method: "POST",
-                headers: { Authorization: `Bearer ${token}` }
+                body: { title: newCaseTitle, summary: "Pending analysis..." },
+                token: await getToken(),
             });
-
-            if (res.ok) {
-                const data = await res.json();
-                router.push(`/cases/${data.case_id}`);
-            }
-        } catch (err) {
-            console.error(err);
+            router.push(`/cases/${data.case_id}`);
+        } catch {
+            alert("Could not create the case. Please try again.");
         } finally {
             setCreating(false);
             setIsModalOpen(false);
@@ -159,6 +132,8 @@ export default function Dashboard() {
 
                 {loading ? (
                     <div className="text-gray-400">Loading cases...</div>
+                ) : casesError ? (
+                    <div className="text-amber-400 text-sm">Could not load your cases. The server may be waking up — refresh in a moment.</div>
                 ) : cases.length === 0 ? (
                     <div className="text-center py-20 border border-dashed border-gray-800 rounded-xl bg-white/5">
                         <p className="text-gray-400 mb-4">No active cases found.</p>

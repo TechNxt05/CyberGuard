@@ -2,12 +2,9 @@ import os
 import sys
 import pytest
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
 
-from backend.app.auth.rbac import rbac_service, UserContext
-from backend.app.db.audit_log import audit_logger
+from app.auth.rbac import rbac_service, UserContext
+from app.db.audit_log import audit_logger
 
 def test_rbac_permissions():
     investigator = UserContext(user_id="user_inv", role="INVESTIGATOR")

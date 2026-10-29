@@ -1,10 +1,15 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 
+# Request size limits keep a single caller from exhausting free-tier LLM quotas or Render's 512 MB RAM.
+MAX_TEXT_CHARS = 8000
+MAX_IMAGE_BASE64_CHARS = 7_000_000  # ~5 MB image
+
 class AnalysisRequest(BaseModel):
-    message: Optional[str] = Field(None, description="The suspicious message text, call summary, or offer content.")
-    image_base64: Optional[str] = Field(None, description="Base64 encoded image string if screenshot is provided.")
-    source: Optional[str] = Field("unknown", description="Source of the message (e.g., whatsapp, sms, call, email)")
+    message: Optional[str] = Field(None, max_length=MAX_TEXT_CHARS, description="The suspicious message text, call summary, or offer content.")
+    image_base64: Optional[str] = Field(None, max_length=MAX_IMAGE_BASE64_CHARS, description="Base64 encoded image string if screenshot is provided.")
+    image_mime_type: Optional[str] = Field("image/jpeg", pattern=r"^image/(png|jpeg|jpg|webp|gif)$")
+    source: Optional[str] = Field("unknown", max_length=50, description="Source of the message (e.g., whatsapp, sms, call, email)")
 
 class UserProfile(BaseModel):
     user_type: Literal["student", "adult", "elderly", "tech_savvy"] = Field(..., description="Inferred age group or persona")
@@ -22,6 +27,7 @@ class ScoutReport(BaseModel):
     severity: Literal["critical", "high", "medium", "low", "safe"] = Field(..., description="Severity level")
     recommendation: str = Field(..., description="Clear action item for the user")
     extracted_entities: dict = Field(default_factory=dict, description="Key details extracted (Date, Amount, URL, etc.)")
+    analysis_status: Literal["ok", "failed"] = Field("ok", description="'failed' when automated analysis could not run; the verdict is then a cautious default, not a judgement")
 
 class Explanation(BaseModel):
     simple_explanation: str = Field(..., description="A simple, jargon-free explanation")
@@ -30,6 +36,10 @@ class Explanation(BaseModel):
 class ActionPlan(BaseModel):
     steps: List[str] = Field(..., description="Immediate DO/DON'T steps")
     blocking_instructions: Optional[str] = Field(None, description="How to block/report")
+
+class Advice(BaseModel):
+    explanation: Explanation
+    action_plan: ActionPlan
 
 class ScamAnalysisResult(BaseModel):
     profile: UserProfile

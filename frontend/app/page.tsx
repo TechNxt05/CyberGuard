@@ -64,7 +64,7 @@ export default function Home() {
                 <div className="mb-16 mt-8">
                     <div className="flex items-center justify-center gap-2 mb-6">
                         <span className="h-px w-12 bg-white/10"></span>
-                        <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Try a live investigation</h2>
+                        <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Try a demo investigation (sample data)</h2>
                         <span className="h-px w-12 bg-white/10"></span>
                     </div>
                     <div className="grid md:grid-cols-3 gap-4 max-w-5xl mx-auto">

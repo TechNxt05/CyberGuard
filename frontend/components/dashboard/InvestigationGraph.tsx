@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -8,20 +8,25 @@ import {
   Background,
   useNodesState,
   useEdgesState,
-  addEdge,
-  Connection,
   Edge,
   Node,
 } from '@xyflow/react';
 
 import '@xyflow/react/dist/style.css';
 
+import type { GraphData } from '@/lib/api';
+
 interface InvestigationGraphProps {
-  data: {
-    nodes: any[];
-    edges: any[];
-  };
+  data: GraphData;
 }
+
+// First node in the centre, the rest on a circle around it.
+const layout = (i: number, total: number) => {
+  if (i === 0) return { x: 0, y: 0 };
+  const angle = (2 * Math.PI * (i - 1)) / Math.max(1, total - 1);
+  const radius = 160 + total * 12;
+  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
+};
 
 export default function InvestigationGraph({ data }: InvestigationGraphProps) {
   // Convert backend nodes to React Flow nodes
@@ -38,13 +43,15 @@ export default function InvestigationGraph({ data }: InvestigationGraphProps) {
         case 'wallet': bgColor = '#142013'; borderColor = '#10b981'; break;
         case 'ip': bgColor = '#1c1936'; borderColor = '#8b5cf6'; break;
         case 'email': bgColor = '#0f172a'; borderColor = '#64748b'; break;
+        case 'phone': bgColor = '#1a1a2e'; borderColor = '#a855f7'; break;
+        case 'scammer': bgColor = '#2a0a12'; borderColor = '#ef4444'; break;
         default: break;
       }
 
       return {
         id: n.id,
         type: 'default',
-        position: { x: i * 200, y: (i % 2) * 150 + 50 },
+        position: layout(i, data.nodes.length),
         data: { label: n.label },
         style: { 
           background: bgColor,
@@ -75,6 +82,10 @@ export default function InvestigationGraph({ data }: InvestigationGraphProps) {
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  // useNodesState only reads its argument once; push later analysis results into the flow.
+  useEffect(() => setNodes(initialNodes), [initialNodes, setNodes]);
+  useEffect(() => setEdges(initialEdges), [initialEdges, setEdges]);
 
   return (
     <div className="w-full h-[400px] bg-slate-950/50 rounded-xl border border-white/5 overflow-hidden glass-panel relative">

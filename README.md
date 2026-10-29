@@ -1,184 +1,118 @@
-# 🛡️ CyberGuardAI: AI-Native Cyber Investigation & Recovery OS
+# 🛡️ CyberGuardAI
 
-**The Production-Grade, Multimodal Mission Control for Cybercrime Resolution.**
+**An AI assistant that helps people in India detect scams and recover from cybercrime.**
 
-CyberGuardAI is a powerful **AI-Native Investigation Platform** that evolves the traditional response to cybercrime. It doesn't just analyze; it investigates, correlates, and guides users through the complex legal and technical journey of recovering from fraud, phishing, and financial cybercrimes.
+CyberGuardAI analyses suspicious messages and screenshots, builds a step-by-step recovery plan for victims, points them to the right authorities (1930, cybercrime.gov.in, banks, platforms), and remembers fraud indicators (UPI IDs, phone numbers, URLs) that more than one person has reported.
 
----
-
-## 🚀 The Vision: DETECT → INVESTIGATE → RESPOND → RECOVER
-
-CyberGuardAI is built for the high-stakes world of cybercrime. It empowers individuals and organizations to:
-- **Investigate** scams with multimodal evidence (screenshots, bank statements, chats).
-- **Correlate** attack chains using **Knowledge Graph & React Flow Intelligence**.
-- **Automate** recovery workflows with a swarm of 7 specialized AI agents.
-- **Generate** legal-grade evidence packages for authorities.
-- **Prevent** future attacks through **Longitudinal Entity-Relationship Memory** and behavioral risk analysis.
+It runs entirely on free tiers: **Vercel** (frontend), **Render** (backend), **MongoDB Atlas M0**, **Clerk**, **Groq** and **Gemini**.
 
 ---
 
-## ⚡ Phase 3 Enterprise Production Hardening Suite
+## What it does
 
-Phase 3 introduces enterprise-grade runtime reliability, strict schema validation, persistent checkpointing, and agent evaluation:
+| Feature | Route | Login | How it works |
+|---|---|---|---|
+| **ScamShield** | `/scamshield` | No | Paste a message or upload a screenshot → profile → scam detection (with a small TF-IDF knowledge base of known patterns) → DuckDuckGo web/news/Reddit/X search → plain-language explanation + action plan. 3 LLM calls. |
+| **CyberResolve** | `/resolve` | No | Describe an incident → a LangGraph workflow classifies it, researches it, builds a phased recovery plan (containment → securing → reporting → recovery → prevention) and maps authorities. Follow-up questions, legal-options and FIR-draft helpers. Nothing is stored. |
+| **Cases** | `/dashboard`, `/cases/[id]` | Yes | Persistent cases in MongoDB: chat with the assistant, auto-generated task checklist, screenshot analysis, FIR/complaint text drafting, PDF report export. |
+| **Investigation console** | `/dashboard/cases/[id]` | Yes | Extracts indicators (regex + screenshot OCR), checks them against threat memory, then produces a threat assessment, attack timeline and entity graph. |
+| **Demo cases** | Landing page | No | Three sample incidents shown with clearly labelled sample data. Demos never write to the database. |
 
-### 1. **Structured Output Contracts per Agent** 📜
-- **Pydantic v2 Contracts**: Every agent output (`Understanding`, `Evidence`, `ThreatIntel`, `Strategy`, `Recovery`, `AuthorityMapper`, `Prevention`) is validated against strict Pydantic schemas.
-- **Self-Healing & Escalation**: On malformed output, the system retries once with a corrective prompt. If validation fails a second time, the case is automatically flagged for `human_escalation_required`.
+### Threat memory
+Every indicator from a signed-in investigation is stored in `threat_entities`. An indicator is marked **confirmed** only after **3 different signed-in users** have reported it, so a single person can't brand an innocent number or UPI ID as malicious. The "Reported in multiple cases" feed shows real data from this collection. The scam advisories shown next to it are curated reference material and are labelled as such.
 
-### 2. **Postgres-Backed State Checkpointer** 💾
-- **Process Restart Resilience**: State survives backend restarts using `AsyncPostgresSaver` and `asyncpg` connection pooling.
-- **Graceful Fallback**: Automatically falls back to `MemorySaver` when PostgreSQL is not configured.
-
-### 3. **Agent-Level Evaluation Harness** 📊
-- **Granular Metrics**: Computes per-agent latency, token count, cost ($), schema compliance, TF-IDF hallucination grounding score, tool success rate, self-reported confidence, and handoff quality.
-- **Mission Control Panel**: Interactive `AgentPerformancePanel.tsx` visualizes per-agent latency bars and flags slow/expensive agents in real time.
-
-### 4. **Swarm Supervisor & Real-time Guardrails** 🛡️
-- **Delegation Depth & Spawn Limits**: Monitors active subagent spawn count (max 5) and delegation depth (max 3).
-- **Runaway Prevention**: Automatically halts execution and flags human escalation if limit thresholds are breached.
-
-### 5. **External OSINT Circuit Breaker & Exponential Backoff** 🔌
-- **Resilience Layer**: Protects external web/news/social OSINT searches (DuckDuckGo, Reddit, Twitter) with exponential backoff retries and circuit breakers (`resilience.py`).
-- **Graceful Degradation**: Returns structured fallback warnings rather than blocking the investigation graph.
-
-### 6. **Tree-Shaped Tracing ("Who Instantiated Whom")** 🌳
-- **Branching Span Visualization**: `AgentFamilyTree.tsx` renders parent-child agent family tree relationships for accurate multi-agent execution tracing.
-
-### 7. **Knowledge Graph Memory Layer** 🕸️
-- **Schema Upgrade**: Upgraded flat threat ledgers into an **Entity Relationship Knowledge Graph** tracking `entity_id`, `connected_entities`, `attack_campaigns`, `victim_count`, and `geographic_cluster`.
-- **Cross-Case Linking**: React Flow visualization renders cross-case entity connections and campaign clusters.
-
-### 8. **AuditAI Investigation Trajectory Replay** ⏯️
-- **Shared Trajectory Schema**: Adopts AuditAI-compatible trajectory logging (`task`, `reasoning_steps`, `tool_calls`, `retries`, `errors`, `recoverability_score`).
-- **Step-by-Step Replay UI**: `InvestigationReplay.tsx` enables interactive step-by-step playback of agent reasoning and tool executions.
+### Honest limits
+- Scores such as "scam likelihood" and "recovery probability" are LLM estimates, not calibrated statistics.
+- Audio analysis transcribes recordings with Groq Whisper and assesses the transcript. It does **not** detect voice deepfakes.
+- Screenshot "tampering" is a visual judgement by the model, not forensic proof.
+- The fraud-hub map shows districts reported in public news coverage. It is reference material, not live data.
+- If the AI is unavailable, ScamShield returns a cautious **"unverified / suspicious"** result. It never returns "safe".
 
 ---
 
-## 🧪 EntroPy Empirical Chaos Benchmark
-
-Monte Carlo fault-injection trials (`ChaosRunner` simulating `api_fail` and `timeout`) evaluated the 7-agent swarm before and after Phase 3 checkpointer & contract integration:
-
-| Metric | Pre-Checkpointer Baseline | Post-Phase 3 Hardened | Empirical Delta |
-|--------|---------------------------|-----------------------|------------------|
-| **Drift Score** | `0.042` | **`0.018`** | **-57.1% Drift Reduction** |
-| **Fault Recovery Rate** | `90.0%` | **`98.0%`** | **+8.0% Improvement** |
-| **Tool Reliability** | `95.0%` | **`99.0%`** | **+4.0% Improvement** |
-| **Schema Compliance** | Unenforced | **100% Validated** | **Strict Pydantic Contracts** |
-| **State Preservation** | In-Memory Only | **Postgres / MemorySaver** | **Resilient Across Restarts** |
-
----
-
-## 🛠️ Tech Stack
-- **Frontend**: Next.js 16 (Turbopack), TypeScript, TailwindCSS, Framer Motion, React Flow.
-- **Backend**: FastAPI, LangGraph 7-Agent Swarm Orchestration, Gemini 1.5 Pro/Flash, OpenAI, LiteLLM.
-- **Checkpointer & DB**: PostgreSQL (`AsyncPostgresSaver`), MongoDB Atlas (Incident Store & Knowledge Graph Memory).
-- **Intelligence & Resilience**: EntroPy Chaos Runner, AuditAI Trajectory Engine, Circuit Breakers, Vision AI, Semantic Search.
-
----
-
-## 🏗️ Architecture
+## Architecture
 
 ```mermaid
 graph TD
-    subgraph Client [Next.js Frontend]
-        UI[Mission Control UI]
-        Stream[Agent Activity Stream]
-        EvalPanel[Agent Performance Matrix]
-        TreeTrace[Agent Family Tree]
-        Replay[AuditAI Trajectory Replay]
-        Graph[Knowledge Graph Console]
+    subgraph Vercel [Next.js 16 frontend]
+        Pages[ScamShield · Resolve · Cases · Console]
+        Proxy[Clerk proxy.ts<br/>protects /dashboard and /cases]
     end
 
-    subgraph API [FastAPI Backend]
-        Router[API Routers]
-        EvalRouter[Evaluation Router]
-        WS[WebSocket Manager]
-        Supervisor[Swarm Supervisor Guardrails]
+    subgraph Render [FastAPI backend - single free instance]
+        RL[Per-IP rate limiter]
+        Auth[Clerk JWT verification]
+        SS[ScamShield LangGraph]
+        CR[CyberResolve LangGraph]
+        AN[Analysis endpoints<br/>confidence · timeline · graph · image · audio]
     end
 
-    subgraph LangGraph [7-Agent Swarm Orchestrator + Checkpointer]
-        Checkpointer[(Postgres / MemorySaver)]
-        Understand(Understanding Agent)
-        Evidence(Evidence Agent)
-        Intel(Threat Intel Agent)
-        Strategy(Strategy Agent)
-        Recovery(Recovery Agent)
-        Auth(Authority Mapper)
-        Prev(Prevention Agent)
+    subgraph External [Free external services]
+        Groq[Groq LLM + Whisper]
+        Gemini[Gemini LLM + vision]
+        DDG[DuckDuckGo search]
+        Mongo[(MongoDB Atlas M0)]
     end
 
-    subgraph Resilience [Resilience & Memory]
-        CB[Circuit Breaker / Retries]
-        Mongo[(MongoDB Knowledge Graph)]
-    end
-
-    UI -->|REST| Router
-    EvalPanel -->|Metrics API| EvalRouter
-    Stream <-->|WebSocket| WS
-    Router --> Supervisor
-    Supervisor --> LangGraph
-    
-    LangGraph <--> Checkpointer
-    Intel --> CB
-    LangGraph --> Mongo
+    Pages -->|REST + Bearer token| RL --> Auth
+    Auth --> SS & CR & AN
+    SS & CR & AN --> Groq
+    SS & CR & AN -.fallback / images.-> Gemini
+    SS & CR --> DDG
+    Auth --> Mongo
 ```
 
----
+**CyberResolve graph:** `understanding → (evidence ∥ research) → strategy → (guide ∥ authorities ∥ prevention)`. It is compiled without a checkpointer: each run is one request, and the caller persists the result to MongoDB.
 
-## 🐳 Docker Production Setup (One-Command Startup)
-
-CyberGuardAI is packaged with fully optimized Docker configurations:
-
-### Quick Start
-1. **Configure Environment Variables**
-   Ensure `.env` exists in the project root (see `.env.example`):
-   ```env
-   GEMINI_API_KEY=your_gemini_key
-   MONGODB_URI=your_mongodb_cluster_url
-   DATABASE_URL=postgresql+asyncpg://user:pass@postgres:5432/cyberguard
-   CLERK_PUBLISHABLE_KEY=your_clerk_publishable
-   CLERK_SECRET_KEY=your_clerk_secret
-   NEXT_PUBLIC_API_URL=http://localhost:8000
-   ```
-
-2. **Run Containers**
-   ```bash
-   docker compose up --build -d
-   ```
-
-3. **Verify Health**
-   ```bash
-   docker compose ps
-   ```
-
-4. **Access Applications**
-   - **Frontend Dashboard**: [http://localhost:3000](http://localhost:3000)
-   - **Backend API & Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+**LLM provider:** Groq is the primary provider and Gemini is the fallback (Gemini is also the only provider used for images). Model names come from env vars (`GROQ_MODEL`, `GEMINI_MODEL`), so a provider retiring a model is a config change, not a code change. Every agent uses one structured-output helper. When the LLM fails, agents fall back to honest defaults: the curated playbook for plans, and an "unverified" verdict for scams.
 
 ---
 
-## 💻 Manual Local Setup Guide (Without Docker)
+## Free-tier deployment
 
-1. **Backend Setup**
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   uvicorn app.main:app --reload
-   ```
+### Backend on Render
+1. Create a **Web Service** from this repo (or use `render.yaml` as a Blueprint) with root directory `backend`.
+2. Set the environment variables from `.env.example` (backend section) in the Render dashboard.
+3. Health check path: `/health`.
+4. **Avoid cold starts (optional):** Render's free instances sleep after 15 idle minutes, and waking takes about 30–60 s. The `keep-alive` GitHub Action pings `/health` every 10 minutes. Enable it by adding a repository **variable** `BACKEND_URL` (Settings → Secrets and variables → Actions → Variables). One always-on service fits inside Render's 750 free hours per month. The frontend also shows a "waking up" banner while it waits.
 
-2. **Frontend Setup**
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
+### Frontend on Vercel
+1. Import the repo with root directory `frontend`.
+2. Set `NEXT_PUBLIC_API_URL` (your Render URL), `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`.
+3. On Render, add your Vercel URL to `ALLOWED_ORIGINS` and `CLERK_AUTHORIZED_PARTIES`.
 
-3. **Run EntroPy Baseline Evaluation**
-   ```bash
-   python backend/app/evaluation/run_entropy_baseline.py
-   python backend/app/evaluation/run_entropy_post_checkpointer.py
-   ```
+### Protecting the free quotas
+- LLM endpoints are rate-limited per IP (full workflows: 10 per 10 minutes; single calls: 30 per 10 minutes).
+- Request size is capped (text 8,000 characters, images 5 MB, audio 20 MB).
+- Repeated web-research queries are cached for 6 hours.
 
 ---
 
-*“Turning Cyber Chaos into Actionable Intelligence and Real-World Recovery.”*
+## Local development
+
+```bash
+# Backend
+cd backend
+python -m venv venv && venv\Scripts\activate      # macOS/Linux: source venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+cp ../.env.example .env                             # fill in the backend section
+uvicorn app.main:app --reload                       # http://localhost:8000/docs
+python -m pytest -q tests
+
+# Frontend
+cd frontend
+npm install
+# create .env.local with NEXT_PUBLIC_API_URL=http://localhost:8000 and your Clerk keys
+npm run dev                                         # http://localhost:3000
+```
+
+Or run both with Docker: `docker compose up --build` (reads `./.env`).
+
+CI (`.github/workflows/ci.yml`) runs the backend tests, the TypeScript check and ESLint on every push and PR.
+
+---
+
+## Tech stack
+- **Frontend:** Next.js 16, React 19, TypeScript, Tailwind CSS, Framer Motion, React Flow, Clerk
+- **Backend:** FastAPI, LangGraph, LangChain (Groq + Gemini), Motor/MongoDB, fpdf2, ddgs
+- **Hosting:** Vercel + Render + MongoDB Atlas (all free tiers)

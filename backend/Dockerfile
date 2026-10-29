@@ -2,15 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies first (cached layer)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
 COPY . .
 
-# Expose port
+RUN useradd --create-home appuser
+USER appuser
+
 EXPOSE 8000
 
-# Start command
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Honour $PORT (Render and most PaaS set it); default to 8000 locally.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

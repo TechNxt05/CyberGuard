@@ -2,12 +2,9 @@ import os
 import sys
 import pytest
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
 
-from backend.app.evaluation.synthetic_generator import synthetic_generator
-from backend.app.evaluation.benchmark_runner import benchmark_runner
+from app.evaluation.synthetic_generator import synthetic_generator
+from app.evaluation.benchmark_runner import benchmark_runner
 
 def test_synthetic_benchmark_dataset_generation():
     dataset = synthetic_generator.generate_benchmark_dataset(10)

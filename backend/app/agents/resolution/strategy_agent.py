@@ -1,71 +1,44 @@
-from langchain_core.prompts import ChatPromptTemplate
-from backend.app.schemas.resolution import ResolutionStrategy, IncidentDimensions, ResolutionStep
-from backend.app.mcp_servers.resolution_knowledge.server import get_playbook
-from backend.app.services.llm_provider import get_llm
+import logging
 import uuid
 
-llm = get_llm(temperature=0.3)
+from app.schemas.resolution import IncidentDimensions, ResolutionStep, ResolutionStrategy
+from app.services.llm_provider import structured_call
+from app.services.playbooks import get_playbook
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are a strategic crisis manager. Create a tailored step-by-step resolution plan."),
-    ("user", """
-    Incident Dimensions: {dimensions}
-    
-    Generic Playbook for Attack Type: {playbook}
-    
-    Create a ResolutionStrategy.
-    - Break down the generic playbook into specific, actionable steps for this user.
-    - Assign a unique step_id.
-    - Categorize each step into the correct phase (containment, securing, reporting, recovery, prevention).
-    - Estimate the timeline.
-    """)
-])
+logger = logging.getLogger(__name__)
 
-from langchain_core.output_parsers import JsonOutputParser
+SYSTEM = "You are a strategic crisis manager. Create a tailored, step-by-step resolution plan for a cybercrime victim."
+
+PHASES = ["containment", "securing", "reporting", "recovery", "prevention"]
+
+
+def _playbook_strategy(playbook: dict) -> ResolutionStrategy:
+    """Deterministic plan straight from the curated playbook, used when the LLM is unavailable."""
+    steps = [
+        ResolutionStep(step_id=str(uuid.uuid4())[:8], phase=phase, action=action, description=action)
+        for phase in PHASES
+        for action in playbook.get(phase, [])
+    ]
+    return ResolutionStrategy(lifecycle_plan=steps, estimated_timeline="Varies - start with the containment steps immediately.")
+
 
 def create_strategy(dimensions: IncidentDimensions, research_context: str = "") -> ResolutionStrategy:
     playbook = get_playbook(dimensions.attack_type)
-    
-    parser = JsonOutputParser(pydantic_object=ResolutionStrategy)
-    format_instructions = parser.get_format_instructions()
-    
-    debug_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a strategic crisis manager. Create a tailored step-by-step resolution plan.\n{format_instructions}"),
-        ("user", """
-        Incident Dimensions: {dimensions}
-        
-        AUTHENTIC RESEARCH FINDINGS (Use these for specific links/forms):
-        {research_context}
-        
-        Generic Playbook for Attack Type: {playbook}
-        
-        Create a ResolutionStrategy.
-        - Break down the generic playbook into specific, actionable steps for this user.
-        - **CRITICAL**: Use the RESEARCH FINDINGS to replace generic advice with specific, verified steps and links found online/on Reddit/Twitter.
-        - Assign a unique step_id.
-        - Categorize each step into the correct phase (containment, securing, reporting, recovery, prevention).
-        - Estimate the timeline.
-        """)
-    ])
-    
-    chain = debug_prompt | llm | parser
-    
+    user = f"""
+Incident dimensions: {dimensions.model_dump()}
+
+Web search snippets (use only clearly relevant, official links; ignore the rest):
+{research_context or "none"}
+
+Generic playbook for this attack type: {playbook}
+
+Break the playbook into specific, actionable steps for this user. Give each step a unique step_id and one
+phase from {PHASES}. Estimate the overall timeline.
+"""
     try:
-        print("--- DEBUG: Generating Resolution Strategy ---")
-        result = chain.invoke({
-            "dimensions": dimensions.model_dump(), 
-            "playbook": playbook,
-            "research_context": research_context,
-            "format_instructions": format_instructions
-        })
-        print(f"--- DEBUG: Strategy Result: {result} ---")
-        return ResolutionStrategy(**result)
+        strategy = structured_call(SYSTEM, user, ResolutionStrategy, temperature=0.3)
+        if strategy.lifecycle_plan:
+            return strategy
     except Exception as e:
-        print(f"--- STRATEGY AGENT ERROR: {e} ---")
-        # Return a safe fallback so the graph doesn't crash, 
-        # but tasks will be empty (user will see 'No tasks').
-        # Better to return at least one generic step.
-        return ResolutionStrategy(
-            lifecycle_plan=[], 
-            estimated_timeline="Error generating plan."
-        )
+        logger.error("Strategy generation failed: %s", e)
+    return _playbook_strategy(playbook if isinstance(playbook, dict) else {})

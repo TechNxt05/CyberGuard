@@ -1,6 +1,6 @@
 import re
 from typing import List, Dict, Any
-from backend.app.schemas.evidence import EvidenceItem, EvidenceClaim, VerificationStatus
+from app.schemas.evidence import EvidenceItem, EvidenceClaim, VerificationStatus
 
 class EvidenceVerifierEngine:
     """

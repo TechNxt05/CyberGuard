@@ -1,16 +1,17 @@
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-from backend.app.schemas.common import UserProfile
-from backend.app.services.llm_provider import get_llm
+import logging
 
-# Initialize LLM with Fallback
-llm = get_llm(temperature=0.7)
+from app.schemas.common import UserProfile
+from app.services.llm_provider import structured_call
 
-profiling_prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are an expert behavioral analyst helping to protect users from scams."),
-    ("user", "Analyze the following message and metadata to infer the user's profile.\n\nMessage: {message}\nSource: {source}\n\nReturn the UserProfile as JSON.")
-])
+logger = logging.getLogger(__name__)
+
+SYSTEM = "You are an expert behavioral analyst helping to protect users from scams. Infer the likely profile of the person who received this message."
+
 
 def profile_user(message: str, source: str) -> UserProfile:
-    chain = profiling_prompt | llm.with_structured_output(UserProfile)
-    return chain.invoke({"message": message, "source": source})
+    try:
+        return structured_call(SYSTEM, f"Message: {message}\nSource: {source}", UserProfile, temperature=0.3)
+    except Exception as e:
+        # Profiling only tunes the tone of the explanation, so a neutral default is safe here.
+        logger.warning("Profiling failed, using default profile: %s", e)
+        return UserProfile(user_type="adult")

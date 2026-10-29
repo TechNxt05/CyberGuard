@@ -1,6 +1,6 @@
 import json
 from typing import Dict, Any
-from backend.app.evaluation.synthetic_generator import synthetic_generator
+from app.evaluation.synthetic_generator import synthetic_generator
 
 class InvestigationBenchmarkRunner:
     """

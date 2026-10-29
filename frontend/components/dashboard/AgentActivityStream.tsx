@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Terminal, Shield, Eye, BrainCircuit, Activity, Database, Zap } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-interface AgentActivity {
+export interface AgentActivity {
   id: string;
   agent: string;
   msg: string;
@@ -12,47 +12,8 @@ interface AgentActivity {
   timestamp: string;
 }
 
-export default function AgentActivityStream({ 
-    sessionId, 
-    fallbackActivities = [] 
-}: { 
-    sessionId: string;
-    fallbackActivities?: AgentActivity[];
-}) {
-    const [activities, setActivities] = useState<AgentActivity[]>(fallbackActivities);
-
-    useEffect(() => {
-        // If fallback activities are provided (like in demo mode), use them directly
-        if (fallbackActivities.length > 0) {
-            setActivities(fallbackActivities);
-            return;
-        }
-
-        const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace("http", "ws") || "ws://localhost:8000";
-        const ws = new WebSocket(`${API_URL}/ws/investigation/${sessionId}`);
-
-        ws.onmessage = (event) => {
-            if (event.data === "pong") return;
-            try {
-                const data = JSON.parse(event.data);
-                setActivities(prev => [data, ...prev].slice(0, 50)); // Keep last 50
-            } catch (e) {
-                console.error("Error parsing WS message:", e);
-            }
-        };
-
-        const pingInterval = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send("ping");
-            }
-        }, 15000);
-
-        return () => {
-            clearInterval(pingInterval);
-            ws.close();
-        };
-    }, [sessionId, fallbackActivities]);
-
+/** Shows progress events produced by the page while it calls the backend (newest first). */
+export default function AgentActivityStream({ activities }: { activities: AgentActivity[] }) {
     const getAgentIcon = (agent: string) => {
         switch (agent.toLowerCase()) {
             case "understanding": return <Eye size={12} className="text-blue-400" />;
@@ -95,7 +56,7 @@ export default function AgentActivityStream({
                 
                 {activities.length === 0 && (
                     <div className="flex items-center gap-2 text-[10px] text-gray-600 italic">
-                        <Terminal size={10} /> Waiting for swarm initialization...
+                        <Terminal size={10} /> No activity yet.
                     </div>
                 )}
             </div>

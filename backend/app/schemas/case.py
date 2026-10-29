@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Literal
 from datetime import datetime
 import uuid
@@ -74,8 +74,7 @@ class Case(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 class Evidence(BaseModel):
     id: str = Field(alias="_id", default_factory=lambda: str(uuid.uuid4()))

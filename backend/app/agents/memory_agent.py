@@ -1,12 +1,14 @@
-import json
-from backend.app.schemas.common import ScamAnalysisResult
-from backend.app.mcp_servers.memory.server import store_scam_case
+import logging
 
-async def update_memory(result: ScamAnalysisResult):
-    """
-    Agent responsible for ingesting the final result into the collective memory.
-    """
-    # Call the MCP tool
-    await store_scam_case(result)
-    
-    return "Memory updated."
+from app.schemas.common import ScamAnalysisResult
+from app.services.case_store import store_scam_case
+
+logger = logging.getLogger(__name__)
+
+
+async def update_memory(result: ScamAnalysisResult) -> None:
+    """Stores the analysed report for later review. Never fails the user's request."""
+    try:
+        await store_scam_case(result)
+    except Exception as e:
+        logger.warning("Could not store scam report: %s", e)

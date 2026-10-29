@@ -3,9 +3,10 @@ import { useAuth } from "@clerk/nextjs";
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Send, ArrowLeft, CheckCircle, Circle, Clock, AlertTriangle, Upload, X, Loader2, ShieldCheck } from "lucide-react";
+import { Send, ArrowLeft, CheckCircle, Clock, AlertTriangle, Upload, X, Loader2, ShieldCheck, Download, Radar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ApiError, MAX_IMAGE_BYTES, apiDownload, apiFetch } from "@/lib/api";
 
 interface Message {
     sender: "user" | "agent";
@@ -14,8 +15,9 @@ interface Message {
 }
 
 interface Task {
+    task_id: string;
     label: string;
-    status: "pending" | "completed";
+    status: "pending" | "in_progress" | "completed" | "blocked";
     action_link?: string;
     action_type?: "link" | "call" | "info";
 }
@@ -41,6 +43,8 @@ export default function CaseChatPage() {
 
     // New Image State
     const [imageBase64, setImageBase64] = useState<string | null>(null);
+    const [imageMime, setImageMime] = useState("image/jpeg");
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [fileName, setFileName] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -50,18 +54,12 @@ export default function CaseChatPage() {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const token = await getToken();
-                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/cases/${id}`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    setCaseDetails(data.case);
-                    setMessages(data.history || []);
-                    setTasks(data.tasks || []);
-                }
+                const data = await apiFetch<{ case: CaseDetails; history: Message[]; tasks: Task[] }>(`/cases/${id}`, { token: await getToken() });
+                setCaseDetails(data.case);
+                setMessages(data.history || []);
+                setTasks(data.tasks || []);
             } catch (err) {
-                console.error(err);
+                setLoadError(err instanceof ApiError && err.status === 404 ? "Case not found." : "Could not load this case. Please retry.");
             } finally {
                 setLoading(false);
             }
@@ -79,7 +77,12 @@ export default function CaseChatPage() {
         if (!file) return;
 
         if (file.type.startsWith("image/")) {
+            if (file.size > MAX_IMAGE_BYTES) {
+                alert("Image is too large (max 5 MB).");
+                return;
+            }
             setFileName(file.name);
+            setImageMime(file.type);
             const reader = new FileReader();
             reader.onload = (e) => {
                 // remove data:image/... base64 prefix
@@ -107,7 +110,8 @@ export default function CaseChatPage() {
 
         const payload = {
             message: input,
-            image_base64: imageBase64
+            image_base64: imageBase64,
+            image_mime_type: imageMime
         };
 
         // Clear input immediately
@@ -117,42 +121,47 @@ export default function CaseChatPage() {
         if (fileInputRef.current) fileInputRef.current.value = "";
 
         try {
-            const token = await getToken();
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/cases/${id}/chat`, {
+            const data = await apiFetch<{ reply: string; tasks: Task[]; case_details: CaseDetails }>(`/cases/${id}/chat`, {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
-                },
-                body: JSON.stringify(payload)
+                body: payload,
+                token: await getToken(),
             });
-
-            const data = await res.json();
-            console.log("DEBUG: Chat response received", data);
-
-            setMessages(prev => [...prev, {
-                sender: "agent",
-                content: data.reply,
-                timestamp: new Date().toISOString()
-            }]);
-
-            if (data.tasks) {
-                console.log("DEBUG: Updating tasks", data.tasks);
-                setTasks(data.tasks);
-            }
-
-            if (data.case_details) {
-                console.log("DEBUG: Updating case details", data.case_details);
-                setCaseDetails(data.case_details);
-            }
+            setMessages(prev => [...prev, { sender: "agent", content: data.reply, timestamp: new Date().toISOString() }]);
+            if (data.tasks) setTasks(data.tasks);
+            if (data.case_details) setCaseDetails(data.case_details);
         } catch (err) {
-            console.error("Failed to send", err);
+            const detail = err instanceof ApiError ? err.message : "Could not reach the server.";
+            setMessages(prev => [...prev, { sender: "agent", content: `Sorry - ${detail}`, timestamp: new Date().toISOString() }]);
         } finally {
             setSending(false);
         }
     };
 
+    const toggleTask = async (t: Task) => {
+        const newStatus = t.status === "completed" ? "pending" : "completed";
+        setTasks(prev => prev.map(pt => pt.task_id === t.task_id ? { ...pt, status: newStatus } : pt));
+        try {
+            await apiFetch(`/cases/${id}/tasks/${t.task_id}`, { method: "PUT", body: { status: newStatus }, token: await getToken() });
+        } catch {
+            setTasks(prev => prev.map(pt => pt.task_id === t.task_id ? { ...pt, status: t.status } : pt));
+        }
+    };
+
+    const downloadReport = async () => {
+        try {
+            await apiDownload("/api/reports/export-pdf", { case_id: id }, await getToken(), `cyberguard_report_${id}.pdf`);
+        } catch {
+            alert("Could not generate the report. Please try again.");
+        }
+    };
+
     if (loading) return <div className="min-h-screen bg-background flex items-center justify-center text-white">Loading Case...</div>;
+    if (loadError) return (
+        <div className="min-h-screen bg-background flex flex-col gap-4 items-center justify-center text-white">
+            <p>{loadError}</p>
+            <Link href="/dashboard" className="text-blue-400 hover:underline">Back to dashboard</Link>
+        </div>
+    );
 
     return (
         <div className="flex h-screen bg-background overflow-hidden relative">
@@ -162,12 +171,18 @@ export default function CaseChatPage() {
                     <Link href="/dashboard" className="text-gray-400 hover:text-white">
                         <ArrowLeft size={20} />
                     </Link>
-                    <div>
+                    <div className="min-w-0 flex-1">
                         <h1 className="text-white font-bold truncate">{caseDetails?.title}</h1>
                         <p className="text-xs text-blue-400 flex items-center gap-1">
                             <Clock size={10} /> Status: {caseDetails?.status}
                         </p>
                     </div>
+                    <Link href={`/dashboard/cases/${id}`} className="text-xs text-gray-300 hover:text-white flex items-center gap-1" title="Indicators, threat memory, graph & timeline">
+                        <Radar size={14} /> <span className="hidden sm:inline">Investigate</span>
+                    </Link>
+                    <Button variant="ghost" onClick={downloadReport} className="text-xs text-gray-300 hover:text-white h-8 px-2" title="Download PDF report">
+                        <Download size={14} /> <span className="hidden sm:inline ml-1">Report</span>
+                    </Button>
                 </header>
 
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -244,23 +259,8 @@ export default function CaseChatPage() {
                         ) : (
                             tasks.map((t, i) => (
                                 <div
-                                    key={i}
-                                    onClick={async () => {
-                                        // Optimistic Update
-                                        const newStatus = t.status === 'completed' ? 'pending' : 'completed';
-                                        setTasks(prev => prev.map(pt => pt.label === t.label ? { ...pt, status: newStatus } : pt));
-
-                                        // API Call
-                                        try {
-                                            const token = await getToken();
-                                            await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/cases/${id}/tasks/${encodeURIComponent(t.label)}?status=${newStatus}`, {
-                                                method: "PUT",
-                                                headers: { Authorization: `Bearer ${token}` }
-                                            });
-                                        } catch (e) {
-                                            console.error("Task update failed", e);
-                                        }
-                                    }}
+                                    key={t.task_id || i}
+                                    onClick={() => toggleTask(t)}
                                     className={`flex items-start gap-3 p-3 rounded-lg border transition-all cursor-pointer group hover:bg-white/5 ${t.status === 'completed'
                                         ? 'bg-emerald-500/5 border-emerald-500/20'
                                         : 'border-white/5 bg-black/20'

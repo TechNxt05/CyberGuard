@@ -1,217 +1,110 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional
 import base64
-from backend.app.auth.clerk_auth import get_current_user
+import json
+import logging
+import uuid
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+
+from app.auth.clerk_auth import get_current_user
+from app.schemas.confidence import ConfidenceRequest, ConfidenceResponse
+from app.schemas.graph import GraphRequest, GraphResponse
+from app.schemas.timeline import TimelineRequest, TimelineResponse
+from app.services.llm_provider import LLMUnavailableError, astructured_call
+from app.services.rate_limit import llm_light
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis", tags=["Analysis"])
 
-@router.post("/analyze-image")
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_AUDIO_BYTES = 20 * 1024 * 1024  # Groq's free Whisper endpoint accepts up to 25 MB
+
+
+async def _read_upload(file: UploadFile, max_bytes: int, allowed_prefix: str) -> bytes:
+    if not (file.content_type or "").startswith(allowed_prefix):
+        raise HTTPException(status_code=415, detail=f"Expected a {allowed_prefix.rstrip('/')} file.")
+    contents = await file.read(max_bytes + 1)
+    if len(contents) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"File too large (max {max_bytes // (1024 * 1024)} MB).")
+    return contents
+
+
+def _unavailable(what: str, error: Exception) -> HTTPException:
+    logger.error("%s failed: %s", what, error)
+    if isinstance(error, LLMUnavailableError):
+        return HTTPException(status_code=503, detail=str(error))
+    return HTTPException(status_code=503, detail=f"{what} is temporarily unavailable. Please try again.")
+
+
+@router.post("/analyze-image", dependencies=[Depends(llm_light)])
 async def analyze_image(file: UploadFile = File(...), user_id: str = Depends(get_current_user)):
-    """Analyzes an uploaded image for cyber threats."""
-    from backend.app.services.vision_engine import VisionEngine
-    try:
-        contents = await file.read()
-        base64_img = base64.b64encode(contents).decode("utf-8")
-        
-        vision = VisionEngine()
-        result = await vision.analyze_screenshot(base64_img)
-        
-        return {"status": "success", "analysis": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Analyzes an uploaded screenshot for cyber threats."""
+    from app.services.vision_engine import VisionEngine
 
-@router.post("/analyze-audio")
+    contents = await _read_upload(file, MAX_IMAGE_BYTES, "image/")
+    try:
+        result = await VisionEngine().analyze_screenshot(base64.b64encode(contents).decode("utf-8"), file.content_type)
+    except Exception as e:
+        raise _unavailable("Image analysis", e)
+    return {"status": "success", "analysis": result}
+
+
+@router.post("/analyze-audio", dependencies=[Depends(llm_light)])
 async def analyze_audio(file: UploadFile = File(...), user_id: str = Depends(get_current_user)):
-    """Analyzes audio for deepfake probabilities and scam scripts."""
-    from backend.app.services.audio_engine import AudioEngine
+    """Transcribes a call recording (Groq Whisper) and assesses it for scam patterns."""
+    from app.services.audio_engine import AudioEngine
+
+    contents = await _read_upload(file, MAX_AUDIO_BYTES, "audio/")
     try:
-        contents = await file.read()
-        
-        audio = AudioEngine()
-        result = await audio.analyze_audio(contents, file.filename)
-        
-        return {"status": "success", "analysis": result}
+        result = await AudioEngine().analyze_audio(contents, file.filename or "recording")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _unavailable("Audio analysis", e)
+    return {"status": "success", "analysis": result}
 
-@router.post("/analyze-video")
-async def analyze_video(file: UploadFile = File(...), user_id: str = Depends(get_current_user)):
-    """Analyzes video for deepfake manipulation and extracts audio frames."""
-    raise HTTPException(status_code=501, detail="Video analysis coming soon")
 
-from backend.app.schemas.confidence import ConfidenceRequest, ConfidenceResponse
-import json
-from langchain_google_genai import ChatGoogleGenerativeAI
-from pydantic import ValidationError
-
-@router.post("/confidence", response_model=ConfidenceResponse)
-async def analyze_confidence(req: ConfidenceRequest):
-    """Calculates threat confidence, urgency, and priority actions using Gemini 1.5 Flash."""
+@router.post("/confidence", response_model=ConfidenceResponse, dependencies=[Depends(llm_light)])
+async def analyze_confidence(req: ConfidenceRequest, user_id: str = Depends(get_current_user)):
+    """Threat likelihood, urgency and priority actions for an incident."""
+    system = (
+        "You are a Cyber Threat Intelligence expert. Assess the incident. Scores are integers 0-100; "
+        "attackSophistication and urgencyLevel are one of LOW, MEDIUM, HIGH, CRITICAL; "
+        "each priority action's impact is one of LOW, MEDIUM, HIGH, CRITICAL. Base every score on the description only."
+    )
+    user = f"Incident description: {req.incidentDescription}\nExtracted entities: {json.dumps(req.extractedEntities)}"
     try:
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.2)
-        prompt = f"""
-You are a Cyber Threat Intelligence Expert. Analyze the following incident and return ONLY valid JSON matching the exact schema below. Do not include markdown code blocks or any other text.
-
-Schema:
-{{
-  "scamLikelihood": int (0-100),
-  "attackSophistication": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
-  "sophisticationScore": int (0-100),
-  "recoveryProbability": int (0-100),
-  "urgencyLevel": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
-  "urgencyReason": "string explaining why",
-  "timeToAct": "string suggesting timeframe",
-  "priorityActions": [
-    {{"action": "string", "deadline": "string", "impact": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"}}
-  ],
-  "riskFactors": ["string"],
-  "mitigatingFactors": ["string"]
-}}
-
-Incident Description: {req.incidentDescription}
-Extracted Entities: {json.dumps(req.extractedEntities)}
-"""
-        response = llm.invoke(prompt)
-        content = response.content.strip()
-        
-        # Remove markdown if present
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-            
-        parsed_json = json.loads(content.strip())
-        return ConfidenceResponse(**parsed_json)
+        return await astructured_call(system, user, ConfidenceResponse, temperature=0.2)
     except Exception as e:
-        # Fallback response in case of error
-        return ConfidenceResponse(
-            scamLikelihood=80,
-            attackSophistication="HIGH",
-            sophisticationScore=75,
-            recoveryProbability=50,
-            urgencyLevel="HIGH",
-            urgencyReason=f"System error during analysis, assuming high risk. Error: {str(e)[:50]}",
-            timeToAct="Act Immediately",
-            priorityActions=[{"action": "Contact Bank", "deadline": "Now", "impact": "CRITICAL"}],
-            riskFactors=["Unknown automated threat"],
-            mitigatingFactors=[]
-        )
+        raise _unavailable("Threat assessment", e)
 
-from backend.app.schemas.timeline import TimelineRequest, TimelineResponse
-import uuid
 
-@router.post("/timeline", response_model=TimelineResponse)
-async def analyze_timeline(req: TimelineRequest):
-    """Reconstructs the attack timeline."""
+@router.post("/timeline", response_model=TimelineResponse, dependencies=[Depends(llm_light)])
+async def analyze_timeline(req: TimelineRequest, user_id: str = Depends(get_current_user)):
+    """Reconstructs the attack timeline from the description."""
+    system = (
+        "You are a cyber forensics expert. Reconstruct a chronological timeline of the attack using ONLY events stated "
+        "or clearly implied in the description. eventType is one of reconnaissance, initial_access, execution, "
+        "exfiltration, impact. Use ISO 8601 timestamps when the description gives times; otherwise use relativeTime "
+        "(e.g. T+0, T+5 mins) and leave timestamp as an empty string."
+    )
     try:
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.1)
-        prompt = f"""
-You are a Cyber Forensics Expert. Reconstruct a chronological timeline of the attack from the incident description.
-Return ONLY valid JSON matching this exact schema:
-{{
-  "events": [
-    {{
-      "id": "string",
-      "timestamp": "ISO 8601 string",
-      "eventType": "reconnaissance" | "initial_access" | "execution" | "exfiltration" | "impact",
-      "description": "string",
-      "impact": "string",
-      "relativeTime": "e.g. T+0, T+5 mins, T+2 hours"
-    }}
-  ]
-}}
-
-Incident Description: {req.incidentDescription}
-"""
-        response = llm.invoke(prompt)
-        content = response.content.strip()
-        
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-            
-        parsed_json = json.loads(content.strip())
-        
-        # Ensure IDs exist
-        for ev in parsed_json.get("events", []):
-            if not ev.get("id"):
-                ev["id"] = str(uuid.uuid4())
-                
-        return TimelineResponse(**parsed_json)
+        result = await astructured_call(system, f"Incident description: {req.incidentDescription}", TimelineResponse, temperature=0.1)
     except Exception as e:
-        import datetime
-        return TimelineResponse(
-            events=[
-                {
-                    "id": str(uuid.uuid4()),
-                    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-                    "eventType": "impact",
-                    "description": "Fallback timeline generated due to error.",
-                    "impact": "Unknown",
-                    "relativeTime": "T+0"
-                }
-            ]
-        )
+        raise _unavailable("Timeline reconstruction", e)
+    for ev in result.events:
+        ev.id = ev.id or str(uuid.uuid4())
+    return result
 
-from backend.app.schemas.graph import GraphRequest, GraphResponse
 
-@router.post("/graph", response_model=GraphResponse)
-async def analyze_graph(req: GraphRequest):
-    """Generates an investigation graph mapping entities and relations."""
+@router.post("/graph", response_model=GraphResponse, dependencies=[Depends(llm_light)])
+async def analyze_graph(req: GraphRequest, user_id: str = Depends(get_current_user)):
+    """Builds an entity relationship graph for the incident."""
+    system = (
+        "You are a cyber threat intelligence analyst. Extract a relationship graph of the entities in this incident. "
+        "Node type is one of victim, threat_actor, mule_account, url, ip, wallet, email, phone. Node ids must be unique "
+        "and every edge must reference existing node ids. Only include entities that appear in the input."
+    )
+    user = f"Incident description: {req.incidentDescription}\nExtracted entities: {json.dumps(req.extractedEntities)}"
     try:
-        # Use Gemini 1.5 Pro for complex graph extraction
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0.1)
-        prompt = f"""
-You are a Cyber Threat Intelligence analyst. Extract a relationship graph of the entities involved in this cyber incident.
-Return ONLY valid JSON matching this exact schema:
-{{
-  "nodes": [
-    {{
-      "id": "string (unique)",
-      "type": "victim" | "threat_actor" | "mule_account" | "url" | "ip" | "wallet" | "email",
-      "label": "string",
-      "metadata": {{"key": "value"}}
-    }}
-  ],
-  "edges": [
-    {{
-      "id": "string",
-      "source": "node_id",
-      "target": "node_id",
-      "label": "string (e.g. 'targeted', 'transferred_to', 'hosted_on')",
-      "type": "animated"
-    }}
-  ]
-}}
-
-Incident Description: {req.incidentDescription}
-Extracted Entities: {json.dumps(req.extractedEntities)}
-"""
-        response = llm.invoke(prompt)
-        content = response.content.strip()
-        
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-            
-        parsed_json = json.loads(content.strip())
-        return GraphResponse(**parsed_json)
+        return await astructured_call(system, user, GraphResponse, temperature=0.1)
     except Exception as e:
-        return GraphResponse(
-            nodes=[
-                {"id": "n_victim", "type": "victim", "label": "Victim", "metadata": {}},
-                {"id": "n_threat", "type": "threat_actor", "label": "Unknown Attacker", "metadata": {}}
-            ],
-            edges=[
-                {"id": "e_1", "source": "n_victim", "target": "n_threat", "label": "targeted_by", "type": "animated"}
-            ]
-        )
+        raise _unavailable("Graph extraction", e)

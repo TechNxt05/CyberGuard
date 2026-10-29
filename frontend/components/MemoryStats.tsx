@@ -1,5 +1,5 @@
 import React from "react";
-import { motion } from "framer-motion";
+import { motion, Variants } from "framer-motion";
 import { ShieldAlert, Database, Skull, Zap, Radio } from "lucide-react";
 
 export interface MemoryStatsData {
@@ -68,7 +68,7 @@ export const MemoryStats = ({ stats, loading }: Props) => {
           custom={0}
           initial="hidden"
           animate="visible"
-          variants={cardVariants as any}
+          variants={cardVariants as Variants}
           className="relative overflow-hidden rounded-2xl border border-white/5 bg-slate-950/40 backdrop-blur-xl p-5 hover:border-blue-500/30 transition-all duration-300 group"
         >
           <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full blur-2xl group-hover:bg-blue-500/10 transition-all duration-500" />
@@ -91,7 +91,7 @@ export const MemoryStats = ({ stats, loading }: Props) => {
           custom={1}
           initial="hidden"
           animate="visible"
-          variants={cardVariants as any}
+          variants={cardVariants as Variants}
           className="relative overflow-hidden rounded-2xl border border-white/5 bg-slate-950/40 backdrop-blur-xl p-5 hover:border-red-500/30 transition-all duration-300 group"
         >
           <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/5 rounded-full blur-2xl group-hover:bg-red-500/10 transition-all duration-500" />
@@ -114,7 +114,7 @@ export const MemoryStats = ({ stats, loading }: Props) => {
           custom={2}
           initial="hidden"
           animate="visible"
-          variants={cardVariants as any}
+          variants={cardVariants as Variants}
           className="relative overflow-hidden rounded-2xl border border-white/5 bg-slate-950/40 backdrop-blur-xl p-5 hover:border-amber-500/30 transition-all duration-300 group"
         >
           <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-2xl group-hover:bg-amber-500/10 transition-all duration-500" />
@@ -137,7 +137,7 @@ export const MemoryStats = ({ stats, loading }: Props) => {
           custom={3}
           initial="hidden"
           animate="visible"
-          variants={cardVariants as any}
+          variants={cardVariants as Variants}
           className="relative overflow-hidden rounded-2xl border border-white/5 bg-slate-950/40 backdrop-blur-xl p-4 hover:border-purple-500/30 transition-all duration-300 group flex flex-col justify-center"
         >
           <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/5 rounded-full blur-2xl group-hover:bg-purple-500/10 transition-all duration-500" />

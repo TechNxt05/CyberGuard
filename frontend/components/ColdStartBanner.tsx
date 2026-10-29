@@ -2,64 +2,67 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { checkHealth } from "@/lib/api";
 
+const SHOW_AFTER_MS = 3000;
+const POLL_MS = 5000;
+const GIVE_UP_MS = 120_000;
+
+/**
+ * Render's free tier sleeps after 15 idle minutes and takes ~30-60s to wake.
+ * Ping /health on load (which also starts the wake-up) and tell the user while we wait.
+ */
 export default function ColdStartBanner() {
-    const [showBanner, setShowBanner] = useState(false);
-    const [isWarming, setIsWarming] = useState(true);
+    const [state, setState] = useState<"checking" | "waking" | "ready" | "offline">("checking");
+    const [dismissed, setDismissed] = useState(false);
+    const [elapsed, setElapsed] = useState(0);
 
     useEffect(() => {
-        let isMounted = true;
-        const startTime = Date.now();
-        let slowPingTimeout: NodeJS.Timeout;
+        let cancelled = false;
+        const started = Date.now();
+        const showTimer = setTimeout(() => !cancelled && setState(s => (s === "checking" ? "waking" : s)), SHOW_AFTER_MS);
+        const tick = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
 
-        const checkHealth = async () => {
-            try {
-                // If it takes more than 3 seconds, show the banner
-                slowPingTimeout = setTimeout(() => {
-                    if (isMounted && isWarming) {
-                        setShowBanner(true);
-                    }
-                }, 3000);
-
-                const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-                const res = await fetch(`${API_URL}/health`);
-                
-                if (res.ok) {
-                    if (isMounted) {
-                        setIsWarming(false);
-                        setShowBanner(false);
-                    }
+        const poll = async () => {
+            while (!cancelled) {
+                if (await checkHealth()) {
+                    if (!cancelled) setState("ready");
+                    return;
                 }
-            } catch (error) {
-                // If backend is completely offline, maybe don't show the warming banner, or show offline
-                console.error("Backend health check failed", error);
-            } finally {
-                clearTimeout(slowPingTimeout);
+                if (Date.now() - started > GIVE_UP_MS) {
+                    if (!cancelled) setState("offline");
+                    return;
+                }
+                await new Promise(r => setTimeout(r, POLL_MS));
             }
         };
-
-        checkHealth();
+        poll().finally(() => clearInterval(tick));
 
         return () => {
-            isMounted = false;
-            clearTimeout(slowPingTimeout);
+            cancelled = true;
+            clearTimeout(showTimer);
+            clearInterval(tick);
         };
     }, []);
 
+    const visible = !dismissed && (state === "waking" || state === "offline");
+
     return (
         <AnimatePresence>
-            {showBanner && (
-                <motion.div 
+            {visible && (
+                <motion.div
                     initial={{ y: -50, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     exit={{ y: -50, opacity: 0 }}
+                    role="status"
                     className="fixed top-0 left-0 w-full z-50 bg-amber-500 text-amber-950 px-4 py-2 text-sm font-bold flex justify-between items-center shadow-md"
                 >
-                    <p>Backend warming up — first response may take 15s. Subsequent responses are fast.</p>
-                    <button 
-                        onClick={() => setShowBanner(false)}
-                        className="p-1 hover:bg-amber-600 rounded transition-colors text-amber-900"
-                    >
+                    <p>
+                        {state === "waking"
+                            ? `Waking up the server (free hosting sleeps when idle) - this can take up to a minute... ${elapsed}s`
+                            : "The server isn't responding right now. Please try again in a few minutes."}
+                    </p>
+                    <button onClick={() => setDismissed(true)} className="p-1 hover:bg-amber-600 rounded transition-colors text-amber-900">
                         Dismiss
                     </button>
                 </motion.div>

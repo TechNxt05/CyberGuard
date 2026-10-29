@@ -2,12 +2,9 @@ import os
 import sys
 import pytest
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
 
-from backend.app.services.entity_resolution_service import entity_resolver
-from backend.app.services.campaign_service import campaign_service
+from app.services.entity_resolution_service import entity_resolver
+from app.services.campaign_service import campaign_service
 
 def test_entity_normalization():
     eid_1, val_1 = entity_resolver.normalize("Phone", "+91 98765 43210")

@@ -1,22 +1,15 @@
-version: '3.8'
-
+# Local full-stack run: `docker compose up --build` (reads ./.env, see .env.example).
 services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
     container_name: cyberguard-backend
     ports:
       - "8000:8000"
-    environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - MONGODB_URI=${MONGODB_URI}
-      - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
-      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
-      - REDIS_URL=${REDIS_URL:-}
     env_file:
       - .env
+    environment:
+      - ALLOWED_ORIGINS=http://localhost:3000
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
@@ -28,21 +21,16 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      args:
+        # The browser calls the API directly, so this must be a host-reachable URL (not http://backend:8000).
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
     container_name: cyberguard-frontend
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://backend:8000
-      - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
       - CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
-    env_file:
-      - .env
     depends_on:
       backend:
         condition: service_healthy
     restart: unless-stopped
-
-networks:
-  default:
-    name: cyberguard-network

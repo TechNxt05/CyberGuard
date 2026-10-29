@@ -1,17 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 
-export interface KnownThreat {
-  entity_type: string;
-  entity_value: string;
-  occurrence_count: number;
-  first_seen: string;
-  last_seen: string;
-  crime_types: string[];
-  risk_score: number;
-  is_confirmed_threat: boolean;
-  case_count: number;
-}
+import type { KnownThreat } from "@/lib/api";
 
 interface Props {
   threats: KnownThreat[];
@@ -66,7 +56,7 @@ export const KnownThreatsPanel = ({ threats }: Props) => {
                 CRIME PATTERNS: <span className="text-gray-200 font-semibold uppercase">{threat.crime_types.join(', ')}</span>
               </div>
               <div className="sm:col-span-2 text-[9px] text-gray-500">
-                FIRST SEEN: {new Date(threat.first_seen).toLocaleString()} // LAST SEEN: {new Date(threat.last_seen).toLocaleString()}
+                FIRST SEEN: {new Date(threat.first_seen).toLocaleString()} · LAST SEEN: {new Date(threat.last_seen).toLocaleString()}
               </div>
             </div>
           </div>

@@ -1,4 +1,20 @@
-export const demoCases = [
+// Sample incidents for the public demo. Everything shown in demo mode is derived from these
+// fixtures and labelled as sample data in the UI; demo runs never write to the backend.
+
+export interface DemoCase {
+  id: string;
+  title: string;
+  type: string;
+  summary: string;
+  evidence: { description: string; extractedEntities: Record<string, string | string[]> };
+  /** Indicators in the same shape the backend uses, for the read-only threat-memory lookup. */
+  indicators: Record<string, string[]>;
+  attackChain: string[];
+  urgency: "MEDIUM" | "HIGH" | "CRITICAL";
+  recoveryProbability: number;
+}
+
+export const demoCases: DemoCase[] = [
   {
     id: "demo-upi-001",
     title: "UPI Payment Fraud — ₹47,000",
@@ -14,6 +30,7 @@ export const demoCases = [
         timeWindow: "4 minutes"
       }
     },
+    indicators: { upi_id: ["pay.refund8821@ybl", "support.gpay991@paytm"], url: ["gpay-refund-portal.xyz/claim"] },
     attackChain: ["WhatsApp social engineering", "Fake refund portal", "UPI PIN harvesting", "Rapid fund transfer to mule accounts"],
     urgency: "HIGH",
     recoveryProbability: 62
@@ -32,6 +49,7 @@ export const demoCases = [
         timeToCompromise: "47 minutes"
       }
     },
+    indicators: { url: ["sbi-kyc-update.in/verify", "sbi-netbanking.co/login"] },
     attackChain: ["SMS spoofing", "Credential phishing page", "Session hijacking", "Account takeover"],
     urgency: "CRITICAL",
     recoveryProbability: 78
@@ -51,6 +69,7 @@ export const demoCases = [
         breachSource: "LinkedIn 2021 breach (likely)"
       }
     },
+    indicators: { email: ["secure.warning@proton.me"], wallet_address: ["1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf"] },
     attackChain: ["Credential stuffing from breach data", "Psychological manipulation", "Crypto payment demand", "Deadline pressure"],
     urgency: "MEDIUM",
     recoveryProbability: 91

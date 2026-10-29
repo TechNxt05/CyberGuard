@@ -2,12 +2,9 @@ import os
 import sys
 import pytest
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
 
-from backend.app.schemas.hypothesis import CaseHypothesis
-from backend.app.services.hypothesis_engine import hypothesis_engine
+from app.schemas.hypothesis import CaseHypothesis
+from app.services.hypothesis_engine import hypothesis_engine
 
 def test_hypothesis_generation_and_ranking():
     hypotheses = hypothesis_engine.generate_competing_hypotheses(

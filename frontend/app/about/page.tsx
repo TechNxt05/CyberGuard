@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Server, Database, Brain, Globe, Shield, Activity, Users, FileText, ArrowRight, Zap, Lock, Search } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { ArrowLeft, Server, Database, Brain, Globe, Shield, Activity, Users, FileText, ArrowRight, Zap, Lock, Search, type LucideIcon } from "lucide-react";
 
 export default function AboutPage() {
     return (
@@ -144,7 +143,7 @@ export default function AboutPage() {
                                 <StepBox icon={Brain} title="Understanding Node" desc="Extracts Dimensions" color="blue" />
                                 <ArrowRight className="text-gray-600 hidden md:block" />
                                 <ArrowDown className="md:hidden" />
-                                <StepBox icon={Search} title="Research Agent" desc="Live Web/Reddit/Twitter" color="red" />
+                                <StepBox icon={Search} title="Research Agent" desc="Web, news and Reddit/X search" color="red" />
                             </div>
 
                             <ArrowDown />
@@ -244,7 +243,7 @@ function ArrowDown({ className = "" }: { className?: string }) {
     </div>
 }
 
-function StepBox({ icon: Icon, title, desc, color }: { icon: any, title: string, desc: string, color: string }) {
+function StepBox({ icon: Icon, title, desc, color }: { icon: LucideIcon, title: string, desc: string, color: string }) {
     const colorClasses: Record<string, string> = {
         gray: "bg-gray-500/10 border-gray-500/20 text-gray-400",
         blue: "bg-blue-500/10 border-blue-500/20 text-blue-400",
@@ -264,7 +263,7 @@ function StepBox({ icon: Icon, title, desc, color }: { icon: any, title: string,
     );
 }
 
-function AgentCard({ name, role, desc, icon: Icon }: any) {
+function AgentCard({ name, role, desc, icon: Icon }: { name: string, role: string, desc: string, icon: LucideIcon }) {
     return (
         <div className="p-6 rounded-2xl bg-white/5 border border-white/10 hover:border-white/20 transition-all hover:bg-white/10 group">
             <div className="flex items-center gap-4 mb-4">

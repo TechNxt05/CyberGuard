@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional
-from backend.app.schemas.hypothesis import CaseHypothesis
+from app.schemas.hypothesis import CaseHypothesis
 
 class HypothesisEngine:
     """

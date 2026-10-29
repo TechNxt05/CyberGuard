@@ -4,22 +4,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import { ShieldAlert, AlertTriangle, CheckCircle2 } from "lucide-react";
 
-interface PriorityAction {
-    action: string;
-    deadline: string;
-    impact: string;
-}
-
-interface ConfidenceData {
-    scamLikelihood: number;
-    attackSophistication: string;
-    sophisticationScore: number;
-    recoveryProbability: number;
-    urgencyLevel: string;
-    urgencyReason: string;
-    timeToAct: string;
-    priorityActions: PriorityAction[];
-}
+import type { ConfidenceData } from "@/lib/api";
 
 export default function ConfidencePanel({ data }: { data: ConfidenceData }) {
     

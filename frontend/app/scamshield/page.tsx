@@ -1,19 +1,19 @@
 "use client"
 import { useState, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowLeft, AlertTriangle, ShieldCheck, ShieldAlert, Search, Loader2, Upload, FileText, X, Brain } from "lucide-react"
+import { ArrowLeft, AlertTriangle, ShieldCheck, ShieldAlert, Search, Loader2, Upload, X, Brain } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
-import { checkScam } from "@/lib/api"
-import { cn } from "@/lib/utils"
-import { SCAM_TYPES } from "@/lib/knowledge"
+import { ApiError, MAX_IMAGE_BYTES, ScamResult, checkScam } from "@/lib/api"
 
 export default function ScamShieldPage() {
     const [input, setInput] = useState("")
     const [loading, setLoading] = useState(false)
-    const [result, setResult] = useState<any>(null)
+    const [result, setResult] = useState<ScamResult | null>(null)
     const [imageBase64, setImageBase64] = useState<string | null>(null)
+    const [imageMime, setImageMime] = useState("image/jpeg")
+    const [error, setError] = useState<string | null>(null)
     const [fileName, setFileName] = useState<string | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -21,15 +21,17 @@ export default function ScamShieldPage() {
         if (!input.trim() && !imageBase64) return
         setLoading(true)
         setResult(null)
+        setError(null)
         try {
             const data = await checkScam({
                 message: input,
                 image_base64: imageBase64 || undefined,
+                image_mime_type: imageBase64 ? imageMime : undefined,
                 source: "user_input"
             })
             setResult(data)
-        } catch (error) {
-            console.error(error)
+        } catch (err) {
+            setError(err instanceof ApiError ? err.message : "Could not reach the server. If it was idle it may take up to a minute to wake up - please retry.")
         } finally {
             setLoading(false)
         }
@@ -53,6 +55,11 @@ export default function ScamShieldPage() {
         }
         // Image File
         else if (file.type.startsWith("image/")) {
+            if (file.size > MAX_IMAGE_BYTES) {
+                alert("Image is too large (max 5 MB).")
+                return
+            }
+            setImageMime(file.type)
             const reader = new FileReader()
             reader.onload = (e) => {
                 const base64 = (e.target?.result as string).split(",")[1] // Remove data:image/... prefix
@@ -123,6 +130,9 @@ export default function ScamShieldPage() {
 
                 {/* Results Section */}
                 <div>
+                    {error && (
+                        <div className="mb-4 p-4 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm">{error}</div>
+                    )}
                     <AnimatePresence>
                         {result && (
                             <motion.div
@@ -152,6 +162,12 @@ export default function ScamShieldPage() {
                                             </div>
                                         </div>
                                     </div>
+
+                                    {result.scout_report.analysis_status === "failed" && (
+                                        <div className="mb-6 p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
+                                            Automated analysis could not be completed, so this is a cautious default - not a verdict. Treat the message as unverified.
+                                        </div>
+                                    )}
 
                                     {/* Analysis Content */}
                                     <div className="space-y-6">
@@ -196,6 +212,25 @@ export default function ScamShieldPage() {
                                                 </div>
                                             </div>
                                         </div>
+
+                                        {result.explanation?.simple_explanation && (
+                                            <div className="bg-black/40 rounded-lg p-4 border border-white/5">
+                                                <h4 className="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">In simple words</h4>
+                                                <p className="text-gray-300 text-sm leading-relaxed">{result.explanation.simple_explanation}</p>
+                                            </div>
+                                        )}
+
+                                        {result.action_plan?.steps?.length > 0 && (
+                                            <div className="bg-black/40 rounded-lg p-4 border border-white/5">
+                                                <h4 className="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">What to do now</h4>
+                                                <ul className="list-disc list-inside space-y-1 text-gray-300 text-sm">
+                                                    {result.action_plan.steps.map((step, i) => <li key={i}>{step}</li>)}
+                                                </ul>
+                                                {result.action_plan.blocking_instructions && (
+                                                    <p className="text-gray-400 text-xs mt-3">{result.action_plan.blocking_instructions}</p>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 </Card>
                             </motion.div>

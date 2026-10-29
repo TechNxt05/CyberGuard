@@ -2,15 +2,11 @@ import os
 import sys
 import pytest
 
-# Ensure project root is in sys.path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
 
-from backend.app.schemas.case import InvestigationCase, CaseStatus
-from backend.app.schemas.task import InvestigationTask
-from backend.app.schemas.case_revision import CaseRevision
-from backend.app.workflows.planner import planner
+from app.schemas.case import InvestigationCase, CaseStatus
+from app.schemas.task import InvestigationTask
+from app.schemas.case_revision import CaseRevision
+from app.workflows.planner import planner
 
 def test_investigation_case_schema():
     case = InvestigationCase(

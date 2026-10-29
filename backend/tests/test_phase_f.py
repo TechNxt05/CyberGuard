@@ -2,11 +2,8 @@ import os
 import sys
 import pytest
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
 
-from backend.app.workflows.agent_policy import policy_engine
+from app.workflows.agent_policy import policy_engine
 
 def test_duplicate_action_caching():
     is_dup, val = policy_engine.check_duplicate_action("ThreatIntelAgent", "search_duckduckgo", "query_upi_123")

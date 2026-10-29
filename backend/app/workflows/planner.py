@@ -1,9 +1,9 @@
 import uuid
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from backend.app.schemas.case import InvestigationCase
-from backend.app.schemas.task import InvestigationTask
-from backend.app.schemas.case_revision import CaseRevision
+from app.schemas.case import InvestigationCase
+from app.schemas.task import InvestigationTask
+from app.schemas.case_revision import CaseRevision
 
 class InvestigationPlanner:
     """

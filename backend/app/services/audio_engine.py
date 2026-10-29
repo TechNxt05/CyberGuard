@@ -1,47 +1,38 @@
 import os
-from backend.app.services.llm_provider import get_llm
-from langchain_core.messages import HumanMessage
+
+from pydantic import BaseModel, Field
+
+from app.services.llm_provider import GROQ_TRANSCRIBE_MODEL, LLMUnavailableError, astructured_call
+
+
+class AudioAssessment(BaseModel):
+    scam_risk_score: int = Field(..., ge=0, le=100)
+    suspicious_entities: list[str] = Field(default_factory=list)
+    summary: str
+
 
 class AudioEngine:
-    def __init__(self):
-        self.llm = get_llm()
+    """
+    Transcribes call recordings with Groq's hosted Whisper (free tier) and assesses the transcript.
+    It does NOT detect voice deepfakes - that needs a dedicated acoustic model, not an LLM.
+    """
+
+    async def transcribe(self, audio_bytes: bytes, filename: str) -> str:
+        if not os.getenv("GROQ_API_KEY"):
+            raise LLMUnavailableError("Audio transcription requires GROQ_API_KEY.")
+        from groq import AsyncGroq
+
+        client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
+        result = await client.audio.transcriptions.create(file=(filename, audio_bytes), model=GROQ_TRANSCRIBE_MODEL)
+        return result.text
 
     async def analyze_audio(self, audio_bytes: bytes, filename: str) -> dict:
-        """
-        Simulates Whisper transcription and Deepfake audio detection.
-        In a production environment, this would call OpenAI Whisper API or a local Whisper/ResNet model.
-        For deployability without massive GPU overhead, we mock the result based on filename/context for now,
-        or we could integrate an external API here.
-        """
-        # Note: True transcription requires sending the file to an API (like OpenAI's audio/transcriptions).
-        # We will mock the transcription and use the LLM to calculate "scam probability" based on typical patterns.
-        
-        # MOCK IMPLEMENTATION
-        transcript = f"Mock transcription of {filename}: 'Hello, this is customer support from your bank. Your account has been blocked. Please share your OTP to unblock it immediately.'"
-        
-        prompt = f"""
-        Analyze this audio transcript for scam patterns and deepfake probability.
-        Transcript: "{transcript}"
-        
-        Identify:
-        1. Deepfake probability (0-100) based on unnatural language or known robocall patterns.
-        2. Scam Risk Score (0-100).
-        3. Suspicious entities (names, numbers).
-        
-        Return strict JSON:
-        {{
-            "transcript": "{transcript}",
-            "deepfake_probability": 85.5,
-            "scam_risk_score": 95.0,
-            "suspicious_entities": [],
-            "summary": "Reasoning here"
-        }}
-        """
-        
-        try:
-            import json
-            response = await self.llm.ainvoke([HumanMessage(content=prompt)])
-            content = response.content.replace("```json", "").replace("```", "").strip()
-            return json.loads(content)
-        except Exception as e:
-            return {"error": str(e)}
+        transcript = await self.transcribe(audio_bytes, filename)
+        assessment = await astructured_call(
+            "You are a scam-call analyst. Assess this call transcript for scam patterns (urgency, impersonation, OTP/PIN "
+            "requests, payment pressure). scam_risk_score is 0-100. List suspicious names, numbers, UPI IDs or URLs.",
+            f'Transcript: "{transcript}"',
+            AudioAssessment,
+            temperature=0.2,
+        )
+        return {"transcript": transcript, **assessment.model_dump()}

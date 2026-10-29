@@ -2,7 +2,6 @@
 
 import React from "react";
 import { motion } from "framer-motion";
-import { Clock, ShieldCheck, FileText, AlertTriangle } from "lucide-react";
 
 interface TimelineEvent {
   id: string;
@@ -57,7 +56,9 @@ export default function IncidentTimeline({ events }: IncidentTimelineProps) {
 
             <div className="flex justify-between items-start mb-1 mt-1">
               <span className="text-[10px] font-mono text-gray-500">
-                {new Date(event.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                {event.timestamp && !isNaN(Date.parse(event.timestamp))
+                  ? new Date(event.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+                  : 'Time not stated'}
               </span>
               <span className={`text-[8px] px-1.5 py-0.5 rounded uppercase font-bold tracking-tighter ${getEventColor(event.eventType)}`}>
                 {event.eventType.replace('_', ' ')}

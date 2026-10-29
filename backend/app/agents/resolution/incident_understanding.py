@@ -1,60 +1,29 @@
-from langchain_core.prompts import ChatPromptTemplate
-from backend.app.schemas.resolution import IncidentDimensions
-from backend.app.services.llm_provider import get_llm
-from typing import Optional, Dict
+import logging
+from typing import Dict, Optional
 
-llm = get_llm(temperature=0)
+from app.schemas.resolution import IncidentDimensions
+from app.services.llm_provider import structured_call
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are an expert cyber incident classifier. Your job is to extract the 5 universal dimensions of a cybercrime from a user's description."),
-    ("user", """
-    User Description: {description}
-    User Context: {context}
-    
-    Analyze and return the IncidentDimensions JSON.
-    Infere specific control authorities (e.g. 'Bank', 'Instagram', 'Police') based on the description.
-    """)
-])
+logger = logging.getLogger(__name__)
 
-from langchain_core.output_parsers import JsonOutputParser
+SYSTEM = (
+    "You are an expert cyber incident classifier. Extract the 5 universal dimensions of a cybercrime "
+    "from the user's description, 3 prevention tips, a brief explanation of the attack mechanism, and the "
+    "specific control authorities (e.g. 'Bank', 'Instagram', 'Police') who can act on it."
+)
+
 
 def understand_incident(description: str, context: Optional[Dict] = None) -> IncidentDimensions:
-    parser = JsonOutputParser(pydantic_object=IncidentDimensions)
-    format_instructions = parser.get_format_instructions()
-    
-    debug_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an expert cyber incident classifier. Your job is to extract the 5 universal dimensions of a cybercrime from a user's description.\n{format_instructions}"),
-        ("user", """
-        User Description: {description}
-        User Context: {context}
-        
-        Analyze and return the IncidentDimensions JSON.
-        - Extract 3 key prevention tips for the future.
-        - Explain the logic (mechanism) of the attack briefly.
-        - Infere specific control authorities (e.g. 'Bank', 'Instagram', 'Police').
-        """)
-    ])
-    
-    chain = debug_prompt | llm | parser
-    
     try:
-        print("--- DEBUG: Understanding Incident ---")
-        result = chain.invoke({
-            "description": description, 
-            "context": str(context),
-            "format_instructions": format_instructions
-        })
-        print(f"--- DEBUG: Incident Dimensions: {result} ---")
-        return IncidentDimensions(**result)
+        return structured_call(SYSTEM, f"User description: {description}\nUser context: {context or {}}", IncidentDimensions, temperature=0)
     except Exception as e:
-        print(f"--- INCIDENT AGENT ERROR: {e} ---")
-        # Fallback
+        logger.error("Incident understanding failed: %s", e)
         return IncidentDimensions(
             asset_affected=["unknown"],
             attack_type="unknown",
             control_authority=["Cyber Crime Portal"],
-            urgency="medium",
-            summary="Error understanding incident.",
-            prevention_tips=["Contact authorities", "Secure accounts"],
-            incident_logic="Unknown error in analysis"
+            urgency="high",
+            summary="We could not automatically analyse this incident. Please follow the general steps below.",
+            prevention_tips=["Never share OTPs, PINs or passwords", "Enable 2FA on important accounts", "Verify requests through official channels"],
+            incident_logic="Automated analysis was unavailable.",
         )

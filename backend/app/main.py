@@ -1,559 +1,276 @@
-import sys
-from typing import Optional
-import os
 import logging
+import os
+import re
+import sys
 from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Literal, Optional
 
-# Configure Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-logger = logging.getLogger(__name__)
-
-# Add project root to sys.path to allow 'backend' imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from backend.app.schemas.common import AnalysisRequest, ScamAnalysisResult
-from backend.app.schemas.resolution import IncidentRequest, CaseState
-from backend.app.schemas.interactive import DoubtRequest, DoubtResponse, FormAssistRequest, FormAssistResponse
-from backend.app.workflows.scamshield_graph import scamshield_app
-from backend.app.workflows.cyber_resolve_graph import cyber_resolve_app
-from backend.app.agents.resolution.state_agent import get_case_state as get_agent_case_state
-from backend.app.agents.resolution.assistants import resolve_doubt, assist_form
-from backend.app.auth.clerk_auth import get_current_user
-from backend.app.db.mongodb import db
 from dotenv import load_dotenv
 
 load_dotenv()
 
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger(__name__)
+
+from fastapi import Depends, FastAPI, HTTPException, Request  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
+
+from app.agents.resolution.assistants import assist_form, resolve_doubt  # noqa: E402
+from app.agents.resolution.form_assistant import generate_form_text  # noqa: E402
+from app.auth.clerk_auth import get_current_user  # noqa: E402
+from app.db.mongodb import db  # noqa: E402
+from app.routers import analysis, investigate, memory, reports, threat_feed  # noqa: E402
+from app.schemas.case import Task  # noqa: E402
+from app.schemas.common import MAX_IMAGE_BASE64_CHARS, MAX_TEXT_CHARS, AnalysisRequest, ScamAnalysisResult  # noqa: E402
+from app.schemas.interactive import DoubtRequest, DoubtResponse, FormAssistRequest, FormAssistResponse  # noqa: E402
+from app.schemas.resolution import IncidentRequest  # noqa: E402
+from app.services import case_store  # noqa: E402
+from app.services.authority_directory import get_official_link  # noqa: E402
+from app.services.llm_provider import atext_call, get_vision_llm, image_message, response_text  # noqa: E402
+from app.services.rate_limit import llm_heavy, llm_light, read_only  # noqa: E402
+from app.workflows.cyber_resolve_graph import run_resolution  # noqa: E402
+from app.workflows.scamshield_graph import scamshield_app  # noqa: E402
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Connect to MongoDB
     await db.connect()
-    try:
-        from backend.app.services.memory_service import ThreatMemoryService
-        if db.db is not None:
-            memory_service = ThreatMemoryService(db.db)
-            await memory_service.ensure_indexes()
-            print("Threat Memory indexes verified.")
-    except Exception as e:
-        print(f"Error initializing Threat Memory indexes: {e}")
+    if db.db is not None:
+        try:
+            from app.services.memory_service import ThreatMemoryService
+            await ThreatMemoryService(db.db).ensure_indexes()
+            await case_store.ensure_indexes()
+        except Exception as e:
+            logger.error("Could not create MongoDB indexes: %s", e)
     yield
-    # Shutdown: Close connection
     await db.close()
 
-app = FastAPI(title="CyberGuardAI One - Platform Backend", version="2.0.0", lifespan=lifespan)
 
+app = FastAPI(title="CyberGuardAI Platform Backend", version="2.1.0", lifespan=lifespan)
+
+# Comma-separated list, e.g. "https://cyberguard.vercel.app,http://localhost:3000".
+ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    # Optional, e.g. "https://cyberguard-.*\.vercel\.app" to allow Vercel preview deployments.
+    allow_origin_regex=os.getenv("ALLOWED_ORIGIN_REGEX") or None,
+    allow_credentials=False,  # auth uses bearer tokens, not cookies
+    allow_methods=["GET", "POST", "PUT"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # Log the details, but never leak internals (stack traces, keys, DB errors) to the client.
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+app.include_router(analysis.router)
+app.include_router(investigate.router)
+app.include_router(memory.router)
+app.include_router(reports.router)
+app.include_router(threat_feed.router)
+
 
 @app.get("/")
 def read_root():
-    return {"status": "CyberGuardAI Platform Online", "auth": "Clerk Enabled", "db": "MongoDB Atlas"}
+    return {"status": "CyberGuardAI Platform Online"}
 
-# Import and include routers
-from backend.app.routers import analysis, evidence, scam_patterns, reports, investigate, memory
-app.include_router(analysis.router)
-app.include_router(evidence.router)
-app.include_router(scam_patterns.router)
-app.include_router(reports.router)
-app.include_router(investigate.router)
-app.include_router(memory.router)
-
-@app.get("/threat-feed")
-async def get_threat_feed():
-    return {
-        "status": "success",
-        "data": [
-            {"source": "CERT-In", "threat": "Phishing Campaign #882", "severity": "high"},
-            {"source": "Global Threat Intelligence", "threat": "Crypto-drainer nodes active", "severity": "medium"}
-        ]
-    }
-
-
-# ==========================================
-# PUBLIC ROUTES (ScamShield - No Login Required)
-# ==========================================
-
-@app.post("/analyze-message", response_model=ScamAnalysisResult)
-async def analyze_message(request: AnalysisRequest):
-    """
-    Main endpoint for analyzing suspicious messages.
-    Triggers the Multi-Agent LangGraph workflow.
-    """
-    try:
-        initial_state = {"request": request, "user_profile": None, "scout_report": None, "explanation": None, "action_plan": None, "final_output": None}
-        result = await scamshield_app.ainvoke(initial_state)
-        if "final_output" in result:
-             return result["final_output"]
-        raise HTTPException(status_code=500, detail="Analysis produced no output")
-    except Exception as e:
-        print(f"Error in analyze-message: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ==========================================
-# AUTHENTICATED CASE MANAGEMENT (New)
-# ==========================================
-
-@app.get("/cases")
-async def list_cases(user_id: str = Depends(get_current_user)):
-    """List all cases for the logged-in user."""
-    from backend.app.mcp_servers.memory.server import list_user_cases
-    return await list_user_cases(user_id)
-
-@app.post("/cases")
-async def create_new_case(title: str, summary: str, user_id: str = Depends(get_current_user)):
-    """Create a new case."""
-    from backend.app.mcp_servers.memory.server import create_case
-    return {"case_id": await create_case(user_id, title, summary)}
-
-@app.get("/cases/{case_id}")
-async def get_case_details(case_id: str, user_id: str = Depends(get_current_user)):
-    """Get full details of a specific case."""
-    from backend.app.mcp_servers.memory.server import get_case, get_case_history, get_tasks
-    case = await get_case(user_id, case_id)
-    if "error" in case:
-        raise HTTPException(status_code=404, detail="Case not found")
-    history = await get_case_history(case_id, user_id)
-    tasks = await get_tasks(case_id, user_id)
-    
-    # Sanitize case for JSON serialization
-    if case and "_id" in case:
-        case["_id"] = str(case["_id"])
-        
-    return {"case": case, "history": history, "tasks": tasks}
-
-class ChatRequest(BaseModel):
-    message: str
-    image_base64: Optional[str] = None
-
-@app.post("/cases/{case_id}/chat")
-async def chat_with_case(case_id: str, chat_req: ChatRequest, user_id: str = Depends(get_current_user)):
-    """Send a message to the AI agent for a specific case."""
-    from backend.app.mcp_servers.memory.server import add_case_message, get_case_state
-    
-    # 1. Save User Message
-    msg_content = chat_req.message
-    if chat_req.image_base64:
-        msg_content += "\n[Image Uploaded]"
-    
-    await add_case_message(case_id, user_id, "user", msg_content)
-    
-    # 2. Get Context (State + History)
-    state_data = await get_case_state(case_id, user_id)
-    
-    # 3. Vision Analysis (Early Exit or Context Injection)
-    vision_context = ""
-    if chat_req.image_base64:
-        # Perform Vision Analysis
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        import os
-        from langchain_core.messages import HumanMessage
-        
-        if os.getenv("GEMINI_API_KEY"):
-            try:
-                vision_llm = ChatGoogleGenerativeAI(
-                    google_api_key=os.getenv("GEMINI_API_KEY"),
-                    model="gemini-1.5-flash",
-                    temperature=0.1
-                )
-                ocr_message = HumanMessage(
-                    content=[
-                        {"type": "text", "text": "Analyze this image relevant to a cybercrime case. Extract full text, identify any suspicious elements (URLs, phone numbers, transaction IDs), and describe the visual context."},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{chat_req.image_base64}"}},
-                    ]
-                )
-                msg_response = await vision_llm.ainvoke([ocr_message])
-                vision_context = f"\n\n[SYSTEM: Image Analysis Result]:\n{msg_response.content}"
-                
-                # Append analysis to chat for context
-                # We won't save this analysis as a separate message to avoid clutter, 
-                # but we will use it in the prompt.
-            except Exception as e:
-                print(f"Vision Error: {e}")
-                vision_context = "\n\n[SYSTEM]: Image upload failed analysis."
-    
-    # 4. Check if we need to run the Initial Resolution Plan
-    ai_response = ""
-    
-    if not state_data or "strategy" not in state_data:
-        try:
-            # Create Initial Request from User Message + Vision Context
-            full_description = chat_req.message + vision_context
-            req = IncidentRequest(description=full_description, user_context={"user_id": user_id})
-            
-            # Invoke Graph
-            initial_state = {"request": req, "case_state": None, "current_guide": None}
-            result = await cyber_resolve_app.ainvoke(initial_state)
-            
-            # Extract Results
-            new_case_state = result["case_state"]
-            ai_response = result["current_guide"] or "I have analyzed your incident. Please check the tasks in the sidebar."
-            
-            # Save State to DB
-            from backend.app.mcp_servers.memory.server import update_case_state, add_task
-            await update_case_state(case_id, user_id, new_case_state.model_dump())
-            
-            # Sync Tasks to DB (for Sidebar)
-            if new_case_state.strategy and new_case_state.strategy.lifecycle_plan:
-                from backend.app.mcp_servers.authority_source.server import get_official_link
-                
-                for step in new_case_state.strategy.lifecycle_plan:
-                    # HEURISTIC: Enrich Task with Link if mention found
-                    # Ideally this logic belongs in the 'Guide' agent, but for MVP speed we do it here.
-                    link = None
-                    atype = None
-                    
-                    if "1930" in step.action:
-                        link = "tel:1930"
-                        atype = "call"
-                    elif "cybercrime.gov" in step.action or "portal" in step.action:
-                         # Fetch verified link
-                         data = get_official_link("cybercrime.gov.in")
-                         if "file_complaint" in data:
-                             link = data["file_complaint"]
-                             atype = "link"
-                    
-                    await add_task(
-                        case_id, 
-                        user_id, 
-                        label=step.action, 
-                        description=step.description,
-                        action_link=link,
-                        action_type=atype
-                    )
-            
-                # Sync Analysis to Case Details (for Dashboard/UI)
-                if new_case_state.dimensions:
-                    from backend.app.mcp_servers.memory.server import update_case_details
-                    dims = new_case_state.dimensions
-                    await update_case_details(case_id, user_id, {
-                        "incident_summary": dims.summary,
-                        "attack_type": dims.attack_type,
-                        "incident_logic": dims.incident_logic,
-                        "prevention_tips": dims.prevention_tips,
-                        "current_phase": new_case_state.strategy.lifecycle_plan[0].phase if new_case_state.strategy and new_case_state.strategy.lifecycle_plan else "analysis"
-                    })
-            
-        except Exception as e:
-            print(f"Graph Error: {e}")
-            ai_response = "I encountered an error analyzing your request. Please try again with more details."
-    else:
-        # Existing Case Handling (Follow-up)
-        # Using a simple LLM call here for now, injected with history and vision context
-        from backend.app.services.llm_provider import get_llm
-        from langchain_core.messages import SystemMessage, HumanMessage
-        
-        # Determine Form Assistance
-        if "draft" in chat_req.message.lower() or "write" in chat_req.message.lower():
-             ai_response = await generate_form_text(state_data.get("dimensions", {}))
-        else:
-            # General Chat with Context
-            llm = get_llm()
-            
-            # Construct History Context (Last 5 messages)
-            from backend.app.mcp_servers.memory.server import get_case_history
-            history = await get_case_history(case_id, user_id)
-            history_text = "\n".join([f"{m['sender'].upper()}: {m['content']}" for m in history[-5:]])
-            
-            prompt = f"""
-            You are CyberGuard, an expert cybersecurity assistant helping a user with Case ID {case_id}.
-            
-            Current Case Status: {state_data.get('status', 'Unknown')}
-            Strategy Overview: {state_data.get('strategy', {}).get('estimated_timeline', 'N/A')}
-            
-            Recent Chat History:
-            {history_text}
-            
-            User's Latest Input: "{chat_req.message}"
-            
-            {vision_context}
-            
-            Provide a helpful, direct response. If the user uploaded an image, reference the analysis provided above.
-            """
-            
-            resp = await llm.ainvoke([HumanMessage(content=prompt)])
-            ai_response = resp.content
-
-    # 4. Save AI Response
-    await add_case_message(case_id, user_id, "agent", ai_response)
-    
-    # 5. Fetch Updated State to return to Frontend (Real-time Update)
-    from backend.app.mcp_servers.memory.server import get_tasks, get_case
-    updated_tasks = await get_tasks(case_id, user_id)
-    updated_case = await get_case(user_id, case_id)
-    
-    return {
-        "reply": ai_response,
-        "tasks": updated_tasks,
-        "case_details": updated_case
-    }
-
-@app.post("/cases/{case_id}/chat")
-async def chat_with_case(case_id: str, chat_req: ChatRequest, user_id: str = Depends(get_current_user)):
-    """Send a message to the AI agent for a specific case."""
-    logger.info(f"--- DEBUG: chat_with_case HANDLER STARTED for case {case_id} ---")
-    from backend.app.mcp_servers.memory.server import add_case_message, get_case_state
-    
-    # 1. Save User Message
-    await add_case_message(case_id, user_id, "user", chat_req.message)
-    
-    # 2. Get Context (State + History)
-    state_data = await get_case_state(case_id, user_id)
-    
-    # 3. Check if we need to run the Initial Resolution Plan
-    # If the case has no strategy/dimensions, it's a "fresh" cae needing analysis.
-    ai_response = ""
-    
-    if not state_data or "strategy" not in state_data:
-        try:
-            # Create Initial Request from User Message
-            req = IncidentRequest(description=chat_req.message, user_context={"user_id": user_id})
-            
-            # Invoke Graph
-            initial_state = {"request": req, "case_state": None, "current_guide": None}
-            result = await cyber_resolve_app.ainvoke(initial_state)
-            
-            # Extract Results
-            logger.info("--- DEBUG: Graph finished. Extracting results. ---")
-            new_case_state = result["case_state"]
-            ai_response = result["current_guide"] or "I have analyzed your incident. Please check the tasks in the sidebar."
-            
-            # Save State to DB
-            print("--- DEBUG: Importing memory tools. ---", flush=True)
-            try:
-                from backend.app.mcp_servers.memory.server import update_case_state, add_task, update_case_details
-            except ImportError as ie:
-                print(f"!!! CRITICAL ERROR importing memory tools: {ie} !!!", flush=True)
-                raise ie
-            
-            print("--- DEBUG: Saving Case State. ---", flush=True)
-            await update_case_state(case_id, user_id, new_case_state.model_dump())
-            print("--- DEBUG: Case State Saved. ---", flush=True)
-            
-            # Sync Case Details (Summary, Attack Type, etc.)
-            try:
-                print(f"--- DEBUG: Attempting to update case details for {case_id} ---", flush=True)
-                details_payload = {
-                    "incident_summary": new_case_state.dimensions.summary,
-                    "attack_type": new_case_state.dimensions.attack_type,
-                    "incident_logic": new_case_state.dimensions.incident_logic,
-                    "prevention_tips": new_case_state.dimensions.prevention_tips
-                }
-                print(f"--- DEBUG: Payload Keys: {list(details_payload.keys())} ---", flush=True)
-                print(f"--- DEBUG: Payload Summary: {details_payload['incident_summary'][:50]}... ---", flush=True)
-                
-                await update_case_details(case_id, user_id, details_payload)
-                print("--- DEBUG: update_case_details completed successfully ---", flush=True)
-            except Exception as e:
-                print(f"!!! CRITICAL ERROR updating case details: {e} !!!", flush=True)
-                import traceback
-                print(traceback.format_exc(), flush=True)
-            
-            # Sync Tasks to DB (for Sidebar)
-            if new_case_state.strategy and new_case_state.strategy.lifecycle_plan:
-                print(f"--- DEBUG: Syncing {len(new_case_state.strategy.lifecycle_plan)} tasks. ---", flush=True)
-                for step in new_case_state.strategy.lifecycle_plan:
-                    await add_task(case_id, user_id, label=step.action, description=step.description)
-            else:
-                print("--- DEBUG: No strategy/tasks to sync. ---", flush=True)
-            
-        except Exception as e:
-            print(f"Graph Error: {e}", flush=True)
-            ai_response = "I encountered an error analyzing your request. Please try again with more details."
-    else:
-        # TODO: Implement Follow-up / Doubt Resolution logic here for existing cases
-        # For now, acknowledge context
-        ai_response = "I have your plan ready. Please check the tasks sidebar. How can I assist you with the current step?"
-
-    # 4. Save AI Response
-    await add_case_message(case_id, user_id, "agent", ai_response)
-    
-    # 5. Get Updated Tasks (to refresh Sidebar)
-    # Add small delay to ensure DB writes are propagated
-    import asyncio
-    await asyncio.sleep(1.0)
-    
-    from backend.app.mcp_servers.memory.server import get_tasks, get_case
-    current_tasks = await get_tasks(case_id, user_id)
-    updated_case = await get_case(user_id, case_id)
-    
-    # Sanitize updated_case for JSON serialization (handle ObjectId)
-    if updated_case and "_id" in updated_case:
-        updated_case["_id"] = str(updated_case["_id"])
-    
-    response_payload = {
-        "reply": ai_response, 
-        "tasks": current_tasks, 
-        "case_details": updated_case
-    }
-    
-    logger.info(f"--- DEBUG: Final Response Keys: {list(response_payload.keys())} ---")
-    if updated_case:
-        logger.info(f"--- DEBUG: Case Details Summary: {updated_case.get('incident_summary')} ---")
-    
-    return response_payload
-
-# ==========================================
-# LEGACY / SPECIFIC RESOLUTION ROUTES
-# (To be refactored into Case Chat)
-# ==========================================
-
-@app.post("/resolve-incident", response_model=CaseState)
-async def resolve_incident_endpoint(request: IncidentRequest):
-    """
-    Legacy endpoint - will eventually move to /cases flow.
-    """
-    try:
-        initial_state = {"request": request, "case_state": None, "current_guide": None}
-        result = await cyber_resolve_app.ainvoke(initial_state)
-        return result["case_state"]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.put("/cases/{case_id}/tasks/{label}")
-async def update_task(case_id: str, label: str, status: str, user_id: str = Depends(get_current_user)):
-    """Manually updates a task status."""
-    from backend.app.mcp_servers.memory.server import update_task_status
-    await update_task_status(case_id, user_id, label, status)
-    return {"status": "success"}
-def solve_doubt_endpoint(req: DoubtRequest):
-    try:
-        case = get_agent_case_state(req.incident_id)
-        if not case:
-            raise HTTPException(status_code=404, detail="Case not found")
-        plan_summary = f"Attack: {case.dimensions.attack_type}. Current Status: {case.status}."
-        answer = resolve_doubt(req.question, plan_summary)
-        return DoubtResponse(answer=answer)
-    except Exception as e:
-         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/case/form-assist", response_model=FormAssistResponse)
-def form_assistance_endpoint(req: FormAssistRequest):
-    try:
-        case = get_agent_case_state(req.incident_id)
-        if not case:
-            raise HTTPException(status_code=404, detail="Case not found")
-        guidance = assist_form(req.action_item)
-        return FormAssistResponse(guidance=guidance, checklist=[]) 
-    except Exception as e:
-         raise HTTPException(status_code=500, detail=str(e))
-
-import asyncio
-
-@app.websocket("/ws/investigation/{session_id}")
-async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    await websocket.accept()
-    try:
-        while True:
-            # Simple heartbeat to keep connection alive
-            data = await websocket.receive_text()
-            if data == "ping":
-                await websocket.send_text("pong")
-    except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for session: {session_id}")
-
-import time
-
-# Simple in-memory cache
-_feed_cache: dict = {"data": None, "timestamp": 0}
-CACHE_TTL = 600  # 10 minutes
-
-STATIC_THREAT_FEED = [
-    {
-        "id": "tf-001",
-        "timestamp": "2 min ago",
-        "type": "UPI_FRAUD",
-        "severity": "HIGH",
-        "title": "Fake GPay refund portal active",
-        "detail": "New phishing domain gpay-refund-2024.xyz targeting Android users via WhatsApp",
-        "affectedPlatform": "Google Pay",
-        "reportCount": 47,
-        "region": "Mumbai, Delhi, Bangalore"
-    },
-    {
-        "id": "tf-002", 
-        "timestamp": "8 min ago",
-        "type": "PHISHING",
-        "severity": "CRITICAL",
-        "title": "SBI KYC SMS campaign detected",
-        "detail": "Spoofed sender ID 'SBI-Alert' sending bulk SMS with credential harvesting links",
-        "affectedPlatform": "SBI NetBanking",
-        "reportCount": 312,
-        "region": "Pan-India"
-    },
-    {
-        "id": "tf-003",
-        "timestamp": "15 min ago", 
-        "type": "SEXTORTION",
-        "severity": "MEDIUM",
-        "title": "Sextortion wave using LinkedIn breach data",
-        "detail": "Attackers using 2021 LinkedIn credentials to add credibility to threats. BTC demand: ₹1-3L",
-        "affectedPlatform": "Email",
-        "reportCount": 89,
-        "region": "Tier-1 cities"
-    },
-    {
-        "id": "tf-004",
-        "timestamp": "23 min ago",
-        "type": "INVESTMENT_FRAUD",
-        "severity": "HIGH", 
-        "title": "Fake trading app 'StockPro AI' on Play Store",
-        "detail": "App requests UPI permissions and drains linked accounts. 1200+ victims reported",
-        "affectedPlatform": "Android / UPI",
-        "reportCount": 1247,
-        "region": "Gujarat, Maharashtra, UP"
-    },
-    {
-        "id": "tf-005",
-        "timestamp": "31 min ago",
-        "type": "VISHING",
-        "severity": "HIGH",
-        "title": "Fake TRAI disconnection calls surge",
-        "detail": "Callers impersonating TRAI officers threatening number disconnection, demanding OTP",
-        "affectedPlatform": "Phone",
-        "reportCount": 203,
-        "region": "North India"
-    },
-    {
-        "id": "tf-006",
-        "timestamp": "44 min ago",
-        "type": "COURIER_FRAUD",
-        "severity": "MEDIUM",
-        "title": "FedEx customs scam targeting professionals",
-        "detail": "Victims told parcel contains contraband, threatened with arrest unless fee paid via crypto",
-        "affectedPlatform": "Phone / WhatsApp",
-        "reportCount": 156,
-        "region": "Bangalore, Hyderabad, Pune"
-    }
-]
-
-@app.get("/api/threat-feed")
-async def get_threat_feed():
-    now = time.time()
-    if _feed_cache["data"] and (now - _feed_cache["timestamp"]) < CACHE_TTL:
-        return _feed_cache["data"]
-    
-    _feed_cache["data"] = {"threats": STATIC_THREAT_FEED, "lastUpdated": "Live"}
-    _feed_cache["timestamp"] = now
-    return _feed_cache["data"]
-
-import datetime
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "timestamp": datetime.datetime.utcnow().isoformat() + "Z", "db_connected": db.client is not None}
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat() + "Z", "db_configured": db.client is not None}
+
+
+# ==========================================
+# PUBLIC ROUTES (no login, rate limited)
+# ==========================================
+
+@app.post("/analyze-message", response_model=ScamAnalysisResult, dependencies=[Depends(llm_heavy)])
+async def analyze_message(request: AnalysisRequest):
+    """ScamShield: profile -> detect -> web research -> explain + action plan."""
+    if not (request.message or "").strip() and not request.image_base64:
+        raise HTTPException(status_code=400, detail="Provide a message or a screenshot.")
+    result = await scamshield_app.ainvoke({"request": request})
+    return result["final_output"]
+
+
+@app.post("/resolve-incident", dependencies=[Depends(llm_heavy)])
+async def resolve_incident_endpoint(request: IncidentRequest):
+    """Anonymous one-off resolution plan (nothing is stored). Signed-in users get persistent cases via /cases."""
+    case_state, guide = await run_resolution(request)
+    return {"case_state": case_state, "guide": guide}
+
+
+@app.post("/case/doubt", response_model=DoubtResponse, dependencies=[Depends(llm_light)])
+async def solve_doubt_endpoint(req: DoubtRequest):
+    return DoubtResponse(answer=await resolve_doubt(req.question, req.context))
+
+
+@app.post("/case/form-assist", response_model=FormAssistResponse, dependencies=[Depends(llm_light)])
+async def form_assistance_endpoint(req: FormAssistRequest):
+    return FormAssistResponse(guidance=await assist_form(req.action_item, [req.context] if req.context else None), checklist=[])
+
+
+# ==========================================
+# AUTHENTICATED CASE MANAGEMENT
+# ==========================================
+
+class CreateCaseRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    summary: str = Field("", max_length=2000)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field("", max_length=MAX_TEXT_CHARS)
+    image_base64: Optional[str] = Field(None, max_length=MAX_IMAGE_BASE64_CHARS)
+    image_mime_type: Optional[str] = Field("image/jpeg", pattern=r"^image/(png|jpeg|jpg|webp|gif)$")
+
+
+class TaskStatusRequest(BaseModel):
+    status: Literal["pending", "in_progress", "completed", "blocked"]
+
+
+async def _owned_case(case_id: str, user_id: str) -> dict:
+    case = await case_store.get_case(user_id, case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    return case
+
+
+@app.get("/cases", dependencies=[Depends(read_only)])
+async def list_cases(user_id: str = Depends(get_current_user)):
+    return await case_store.list_user_cases(user_id)
+
+
+@app.post("/cases", dependencies=[Depends(read_only)])
+async def create_new_case(req: CreateCaseRequest, user_id: str = Depends(get_current_user)):
+    return {"case_id": await case_store.create_case(user_id, req.title, req.summary)}
+
+
+@app.get("/cases/{case_id}", dependencies=[Depends(read_only)])
+async def get_case_details(case_id: str, user_id: str = Depends(get_current_user)):
+    case = await _owned_case(case_id, user_id)
+    return {
+        "case": case,
+        "history": await case_store.get_case_history(case_id, user_id),
+        "tasks": await case_store.get_tasks(case_id, user_id),
+    }
+
+
+@app.put("/cases/{case_id}/tasks/{task_id}", dependencies=[Depends(read_only)])
+async def update_task(case_id: str, task_id: str, req: TaskStatusRequest, user_id: str = Depends(get_current_user)):
+    if not await case_store.update_task_status(case_id, user_id, task_id, req.status):
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"status": "success"}
+
+
+async def _describe_image(image_base64: str, mime_type: str) -> str:
+    prompt = (
+        "Analyze this image relevant to a cybercrime case. Extract the full text, identify suspicious elements "
+        "(URLs, phone numbers, UPI IDs, transaction IDs), and describe the visual context."
+    )
+    try:
+        response = await get_vision_llm().ainvoke([image_message(prompt, image_base64, mime_type)])
+        return response_text(response.content)
+    except Exception as e:
+        logger.warning("Case image analysis failed: %s", e)
+        return ""
+
+
+def _task_link(action: str) -> tuple[Optional[str], Optional[str]]:
+    if "1930" in action:
+        return "tel:1930", "call"
+    if "cybercrime.gov" in action.lower() or "portal" in action.lower():
+        data = get_official_link("cybercrime.gov.in")
+        return data.get("file_complaint"), "link"
+    return None, None
+
+
+async def _start_case(case_id: str, user_id: str, description: str) -> str:
+    """First message on a case: run the full resolution workflow and persist plan, tasks and details."""
+    case_state, guide = await run_resolution(IncidentRequest(description=description[:MAX_TEXT_CHARS], user_context={"country": "India"}))
+    await case_store.update_case_state(case_id, user_id, case_state.model_dump(mode="json"))
+
+    plan = case_state.strategy.lifecycle_plan
+    tasks = []
+    for step in plan:
+        link, link_type = _task_link(step.action)
+        tasks.append(Task(label=step.action, description=step.description, action_link=link, action_type=link_type))
+    await case_store.add_tasks(case_id, user_id, tasks)
+
+    dims = case_state.dimensions
+    await case_store.update_case_details(case_id, user_id, {
+        "incident_summary": dims.summary,
+        "attack_type": dims.attack_type,
+        "incident_logic": dims.incident_logic,
+        "prevention_tips": dims.prevention_tips,
+        "current_phase": plan[0].phase if plan else "analysis",
+    })
+    return guide or "I've analysed your incident and created a step-by-step plan. Check the tasks in the sidebar."
+
+
+async def _follow_up(case_id: str, user_id: str, state_data: dict, message: str) -> str:
+    dimensions = state_data.get("dimensions", {})
+    if re.search(r"\b(draft|fir)\b|complaint text|write (the|my|a) complaint", message.lower()):
+        return await generate_form_text(dimensions, message)
+
+    history = await case_store.get_case_history(case_id, user_id, limit=8)
+    history_text = "\n".join(f"{m['sender'].upper()}: {m['content']}" for m in history)
+    plan = state_data.get("strategy", {}).get("lifecycle_plan", [])
+    plan_text = "\n".join(f"- [{s.get('phase')}] {s.get('action')}" for s in plan[:10])
+    return await atext_call(
+        "You are CyberGuard, an expert assistant helping a cybercrime victim through their recovery plan. "
+        "Be direct and practical. Never ask for OTPs, passwords or card numbers.",
+        f"Incident: {dimensions.get('summary', 'unknown')} (type: {dimensions.get('attack_type', 'unknown')})\n"
+        f"Current plan:\n{plan_text or 'none'}\n\nRecent conversation:\n{history_text}\n\nUser's latest message: {message}",
+        temperature=0.4,
+    )
+
+
+@app.post("/cases/{case_id}/chat", dependencies=[Depends(llm_heavy)])
+async def chat_with_case(case_id: str, chat_req: ChatRequest, user_id: str = Depends(get_current_user)):
+    """Send a message (and optional screenshot) to the AI assistant for a specific case."""
+    await _owned_case(case_id, user_id)
+    if not chat_req.message.strip() and not chat_req.image_base64:
+        raise HTTPException(status_code=400, detail="Message is empty.")
+
+    await case_store.add_case_message(case_id, user_id, "user", chat_req.message + ("\n[Image uploaded]" if chat_req.image_base64 else ""))
+
+    message = chat_req.message
+    if chat_req.image_base64:
+        image_text = await _describe_image(chat_req.image_base64, chat_req.image_mime_type or "image/jpeg")
+        if image_text:
+            message = f"{message}\n\n[Screenshot analysis]\n{image_text}"
+
+    state_data = await case_store.get_case_state(case_id, user_id)
+    try:
+        if not state_data.get("strategy"):
+            reply = await _start_case(case_id, user_id, message)
+        else:
+            reply = await _follow_up(case_id, user_id, state_data, message)
+    except Exception:
+        logger.exception("Case chat failed for case %s", case_id)
+        reply = "I couldn't process that right now (the AI service may be busy). Please try again in a minute."
+
+    await case_store.add_case_message(case_id, user_id, "agent", reply)
+    return {
+        "reply": reply,
+        "tasks": await case_store.get_tasks(case_id, user_id),
+        "case_details": await case_store.get_case(user_id, case_id),
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

@@ -19,5 +19,5 @@ class GraphResponse(BaseModel):
     edges: List[GraphEdge]
 
 class GraphRequest(BaseModel):
-    incidentDescription: str
-    extractedEntities: Dict[str, Any]
+    incidentDescription: str = Field(..., min_length=3, max_length=8000)
+    extractedEntities: Dict[str, Any] = Field(default_factory=dict)

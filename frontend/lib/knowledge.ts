@@ -1,4 +1,4 @@
-import { ShieldAlert, Phone, Smartphone, Lock, CreditCard, UserX, Video, Fingerprint, Briefcase, Package, Heart, QrCode, Wifi, Coins, Headphones, FileWarning, Monitor } from "lucide-react"
+import { Phone, Smartphone, UserX, Video, Fingerprint, Briefcase, Package, Heart, QrCode, Wifi, Coins, Headphones, FileWarning, Monitor } from "lucide-react"
 
 export const SCAM_TYPES = [
     {

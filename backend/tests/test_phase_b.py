@@ -2,13 +2,9 @@ import os
 import sys
 import pytest
 
-# Ensure project root is in sys.path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
 
-from backend.app.schemas.evidence import EvidenceItem, EvidenceProvenanceRecord, EvidenceClaim
-from backend.app.services.evidence_verifier import evidence_verifier
+from app.schemas.evidence import EvidenceItem, EvidenceProvenanceRecord, EvidenceClaim
+from app.services.evidence_verifier import evidence_verifier
 
 def test_evidence_item_hashing_and_provenance():
     raw_content = b"Fake Bank Statement Screenshot Binary Data"

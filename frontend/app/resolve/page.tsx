@@ -1,11 +1,11 @@
 "use client"
 import { useState, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Send, LifeBuoy, CheckCircle, ChevronRight, HelpCircle, FileText } from "lucide-react"
+import { Send, LifeBuoy, CheckCircle, HelpCircle, FileText } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
-import { resolveIncident, solveDoubt, assistForm } from "@/lib/api"
+import { ApiError, CaseStateData, resolveIncident, solveDoubt, assistForm } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 interface Message {
@@ -20,7 +20,7 @@ export default function ResolvePage() {
     ])
     const [input, setInput] = useState("")
     const [loading, setLoading] = useState(false)
-    const [caseState, setCaseState] = useState<any>(null)
+    const [caseState, setCaseState] = useState<CaseStateData | null>(null)
     const [guide, setGuide] = useState<string | null>(null)
     const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -30,8 +30,18 @@ export default function ResolvePage() {
         }
     }, [messages])
 
+    // Anonymous sessions aren't stored server-side, so follow-up questions carry the plan as context.
+    const planContext = () => {
+        if (!caseState) return ""
+        const steps = caseState.strategy.lifecycle_plan.map((st, i) => `${i + 1}. ${st.action}`).join("\n")
+        return `Incident: ${caseState.dimensions.summary} (type: ${caseState.dimensions.attack_type}).\nPlan:\n${steps}`
+    }
+
+    const errorText = (error: unknown) =>
+        error instanceof ApiError ? error.message : "I couldn't reach the server. If it was idle it can take up to a minute to wake up - please try again."
+
     const handleSend = async () => {
-        if (!input.trim()) return
+        if (!input.trim() || loading) return
         const userMsg = input
         setInput("")
         setMessages(prev => [...prev, { role: "user", content: userMsg }])
@@ -39,34 +49,35 @@ export default function ResolvePage() {
 
         try {
             if (!caseState) {
-                // Initial Incident Report
-                const data = await resolveIncident({ description: userMsg, user_context: { country: "India" } })
+                const { case_state: data, guide: firstGuide } = await resolveIncident({ description: userMsg, user_context: { country: "India" } })
                 setCaseState(data)
-                // Extract initial guide from checking generic or if backend sent it (backend sends it via separate logic usually, but here we can rely on state)
-                // NOTE: Our API client wrapper for resolveIncident only returns case_state, but we need the guide too.
-                // Actually, the backend resolve_incident endpoint currently only returns CaseState.
-                // I need to update the hook to fetch the guide or just use the plan from CaseState.
-
-                // Let's assume the first step is the guide for now, or I'll fix the backend soon.
-                // For MVP, simply extracting the first incomplete step from strategy
-                if (data.strategy?.lifecycle_plan?.length > 0) {
-                    setGuide(`Step 1: ${data.strategy.lifecycle_plan[0].action}\n${data.strategy.lifecycle_plan[0].description}`)
-                }
-
+                const first = data.strategy?.lifecycle_plan?.[0]
+                setGuide(firstGuide || (first ? `Step 1: ${first.action}\n${first.description}` : null))
                 setMessages(prev => [...prev, {
                     role: "assistant",
-                    content: `I've analyzed your situation. It looks like a ${data.dimensions.attack_type} attack. I have generated a ${data.strategy.lifecycle_plan.length}-step plan for you. Follow the guide on the right.`
+                    content: `I've analyzed your situation (${data.dimensions.attack_type}). I've created a ${data.strategy.lifecycle_plan.length}-step plan - follow the guide on the right and ask me anything.`
                 }])
-
             } else {
-                // Interactive "Doubt" or standard chat
-                // We assume generic chat is a doubt for now
-                const data = await solveDoubt(caseState.incident_id, userMsg)
+                const data = await solveDoubt(userMsg, planContext())
                 setMessages(prev => [...prev, { role: "assistant", content: data.answer, type: "doubt_answer" }])
             }
         } catch (error) {
-            console.error(error)
-            setMessages(prev => [...prev, { role: "assistant", content: "I encountered an error connecting to the core. Please try again." }])
+            setMessages(prev => [...prev, { role: "assistant", content: errorText(error) }])
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const runTool = async (kind: "legal" | "fir") => {
+        if (!caseState || loading) return
+        setLoading(true)
+        try {
+            const content = kind === "legal"
+                ? (await solveDoubt("What are my legal options and rights for this incident in India, and which authorities should I approach?", planContext())).answer
+                : (await assistForm("Draft the complaint text for an FIR / cybercrime.gov.in complaint", planContext())).guidance
+            setMessages(prev => [...prev, { role: "assistant", content, type: kind === "legal" ? "doubt_answer" : "form_guide" }])
+        } catch (error) {
+            setMessages(prev => [...prev, { role: "assistant", content: errorText(error) }])
         } finally {
             setLoading(false)
         }
@@ -91,7 +102,7 @@ export default function ResolvePage() {
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 className={cn(
-                                    "max-w-[85%] p-4 rounded-xl text-sm leading-relaxed",
+                                    "max-w-[85%] p-4 rounded-xl text-sm leading-relaxed whitespace-pre-wrap",
                                     m.role === "user" ? "bg-blue-600 text-white ml-auto" : "bg-white/10 text-gray-200 mr-auto"
                                 )}
                             >
@@ -139,7 +150,7 @@ export default function ResolvePage() {
 
                                 <div className="space-y-2">
                                     <h4 className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Resolution Plan</h4>
-                                    {caseState.strategy.lifecycle_plan.map((step: any, i: number) => (
+                                    {caseState.strategy.lifecycle_plan.map((step, i) => (
                                         <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/5 opacity-50 hover:opacity-100 transition-opacity">
                                             <span className="text-xs text-gray-400">{i + 1}</span>
                                             <p className="text-xs text-gray-300 line-clamp-1">{step.action}</p>
@@ -150,11 +161,11 @@ export default function ResolvePage() {
                                 <div className="pt-4 border-t border-white/10">
                                     <h4 className="text-gray-500 text-xs uppercase tracking-wider font-semibold mb-3">Quick Tools</h4>
                                     <div className="grid grid-cols-2 gap-2">
-                                        <Button variant="secondary" className="text-xs h-auto py-2 flex flex-col gap-1">
+                                        <Button variant="secondary" disabled={loading} onClick={() => runTool("legal")} className="text-xs h-auto py-2 flex flex-col gap-1">
                                             <HelpCircle size={16} className="text-blue-400" />
                                             Legal Help
                                         </Button>
-                                        <Button variant="secondary" className="text-xs h-auto py-2 flex flex-col gap-1" >
+                                        <Button variant="secondary" disabled={loading} onClick={() => runTool("fir")} className="text-xs h-auto py-2 flex flex-col gap-1">
                                             <FileText size={16} className="text-purple-400" />
                                             Draft FIR
                                         </Button>

@@ -2,7 +2,7 @@ import json
 import hashlib
 from typing import Dict, Any, Optional
 from datetime import datetime
-from backend.app.schemas.evidence_package import LegalEvidencePackage, EvidenceManifestItem
+from app.schemas.evidence_package import LegalEvidencePackage, EvidenceManifestItem
 
 class LegalReportGeneratorService:
     """

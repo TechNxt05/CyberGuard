@@ -28,6 +28,10 @@ class ResolutionState(TypedDict):
     investigation_insights: List[str] | None
 
 
+def _language(state: ResolutionState) -> str | None:
+    return (state["request"].user_context or {}).get("language")
+
+
 def understanding_node(state: ResolutionState):
     request = state["request"]
     dimensions = understand_incident(request.description, request.user_context)
@@ -70,13 +74,13 @@ def research_node(state: ResolutionState):
 
 def strategy_node(state: ResolutionState):
     case = state["case_state"]
-    case.strategy = create_strategy(case.dimensions, research_context=state.get("research_findings") or "")
+    case.strategy = create_strategy(case.dimensions, research_context=state.get("research_findings") or "", language=_language(state))
     return {"case_state": case}
 
 
 def recovery_node(state: ResolutionState):
     plan = state["case_state"].strategy.lifecycle_plan
-    return {"current_guide": guide_step(plan[0]) if plan else None}
+    return {"current_guide": guide_step(plan[0], _language(state)) if plan else None}
 
 
 def authority_node(state: ResolutionState):

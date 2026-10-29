@@ -1,9 +1,9 @@
 "use client"
 import { useAuth } from "@clerk/nextjs";
 import { useEffect, useState, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Send, ArrowLeft, CheckCircle, Clock, AlertTriangle, Upload, X, Loader2, ShieldCheck, Download, Radar } from "lucide-react";
+import { Send, ArrowLeft, CheckCircle, Clock, AlertTriangle, Upload, X, Loader2, ShieldCheck, Download, Radar, Trash2, FileCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ApiError, MAX_IMAGE_BYTES, apiDownload, apiFetch } from "@/lib/api";
@@ -34,12 +34,14 @@ interface CaseDetails {
 export default function CaseChatPage() {
     const { id } = useParams();
     const { getToken } = useAuth();
+    const router = useRouter();
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [caseDetails, setCaseDetails] = useState<CaseDetails | null>(null);
     const [tasks, setTasks] = useState<Task[]>([]);
     const [loading, setLoading] = useState(true);
     const [sending, setSending] = useState(false);
+    const [showSidebar, setShowSidebar] = useState(false);
 
     // New Image State
     const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -147,6 +149,24 @@ export default function CaseChatPage() {
         }
     };
 
+    const deleteCase = async () => {
+        if (!confirm("Permanently delete this case and its messages?")) return;
+        try {
+            await apiFetch(`/cases/${id}`, { method: "DELETE", token: await getToken() });
+            router.push("/dashboard");
+        } catch {
+            alert("Could not delete the case. Please try again.");
+        }
+    };
+
+    const downloadEvidence = async () => {
+        try {
+            await apiDownload("/api/reports/evidence-package", { case_id: id }, await getToken(), `evidence_package_${id}.pdf`);
+        } catch {
+            alert("Could not generate the evidence package. Please try again.");
+        }
+    };
+
     const downloadReport = async () => {
         try {
             await apiDownload("/api/reports/export-pdf", { case_id: id }, await getToken(), `cyberguard_report_${id}.pdf`);
@@ -167,7 +187,7 @@ export default function CaseChatPage() {
         <div className="flex h-screen bg-background overflow-hidden relative">
             {/* LEFT: Chat Area */}
             <div className="flex-1 flex flex-col min-w-0">
-                <header className="h-16 border-b border-white/10 flex items-center px-6 gap-4 bg-white/5">
+                <header className="h-16 border-b border-white/10 flex items-center px-3 sm:px-6 gap-2 sm:gap-4 bg-white/5">
                     <Link href="/dashboard" className="text-gray-400 hover:text-white">
                         <ArrowLeft size={20} />
                     </Link>
@@ -177,15 +197,24 @@ export default function CaseChatPage() {
                             <Clock size={10} /> Status: {caseDetails?.status}
                         </p>
                     </div>
+                    <Button variant="ghost" onClick={() => setShowSidebar(true)} className="md:hidden text-xs text-gray-300 h-8 px-2">
+                        Tasks ({tasks.filter(t => t.status === "completed").length}/{tasks.length})
+                    </Button>
                     <Link href={`/dashboard/cases/${id}`} className="text-xs text-gray-300 hover:text-white flex items-center gap-1" title="Indicators, threat memory, graph & timeline">
                         <Radar size={14} /> <span className="hidden sm:inline">Investigate</span>
                     </Link>
+                    <Button variant="ghost" onClick={downloadEvidence} className="text-xs text-emerald-300 hover:text-white h-8 px-2" title="Evidence package for 1930 / cybercrime.gov.in">
+                        <FileCheck size={14} /> <span className="hidden sm:inline ml-1">Evidence pack</span>
+                    </Button>
                     <Button variant="ghost" onClick={downloadReport} className="text-xs text-gray-300 hover:text-white h-8 px-2" title="Download PDF report">
                         <Download size={14} /> <span className="hidden sm:inline ml-1">Report</span>
                     </Button>
+                    <Button variant="ghost" onClick={deleteCase} className="text-xs text-gray-500 hover:text-red-400 h-8 px-2" title="Delete case">
+                        <Trash2 size={14} />
+                    </Button>
                 </header>
 
-                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-6">
                     {messages.length === 0 && (
                         <div className="text-center text-gray-500 mt-20">
                             <p>Start the conversation to resolve this incident.</p>
@@ -250,7 +279,12 @@ export default function CaseChatPage() {
             </div>
 
             {/* RIGHT: Sidebar (Tasks & Context) */}
-            <div className="w-80 border-l border-white/10 bg-black/20 hidden md:flex flex-col h-full overflow-hidden">
+            <div className={`${showSidebar ? "fixed inset-0 z-40 flex bg-background" : "hidden"} md:static md:flex md:w-80 border-l border-white/10 md:bg-black/20 flex-col h-full overflow-hidden`}>
+                <div className="md:hidden flex justify-end p-3 border-b border-white/10">
+                    <Button variant="ghost" onClick={() => setShowSidebar(false)} className="text-gray-300 h-8 px-2" aria-label="Close tasks">
+                        <X size={18} />
+                    </Button>
+                </div>
                 <div className="p-6 border-b border-white/10 h-1/2 overflow-y-auto">
                     <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">Case Tasks</h2>
                     <div className="space-y-3">

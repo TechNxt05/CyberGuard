@@ -52,7 +52,8 @@ def with_retry_and_circuit_breaker(circuit_name: str, max_retries: int = 3, back
     """
     Decorator adding exponential backoff and circuit breaker protection to external calls.
     """
-    cb = CircuitBreaker(circuit_name, failure_threshold=max_retries)
+    # Trip only after several consecutive failures, independent of how many retries each call gets.
+    cb = CircuitBreaker(circuit_name, failure_threshold=max(3, max_retries))
     
     def decorator(func: Callable):
         @functools.wraps(func)

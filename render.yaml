@@ -25,6 +25,18 @@ services:
         sync: false
       - key: ALLOWED_ORIGIN_REGEX
         sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: GOOGLE_SAFE_BROWSING_KEY
+        sync: false
+      - key: URLHAUS_AUTH_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: ADMIN_USER_IDS
+        sync: false
       - key: GEMINI_MODEL
         value: gemini-flash-lite-latest
       - key: GROQ_MODEL

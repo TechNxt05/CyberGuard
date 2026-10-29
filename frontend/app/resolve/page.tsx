@@ -5,7 +5,10 @@ import { Send, LifeBuoy, CheckCircle, HelpCircle, FileText } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
-import { ApiError, CaseStateData, resolveIncident, solveDoubt, assistForm } from "@/lib/api"
+import { ProgressSteps } from "@/components/ProgressSteps"
+import { LanguageToggle } from "@/components/LanguageToggle"
+import { useLang } from "@/lib/i18n"
+import { ApiError, CaseStateData, ProgressStep, resolveIncident, solveDoubt, assistForm } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 interface Message {
@@ -22,7 +25,15 @@ export default function ResolvePage() {
     const [loading, setLoading] = useState(false)
     const [caseState, setCaseState] = useState<CaseStateData | null>(null)
     const [guide, setGuide] = useState<string | null>(null)
+    const [progress, setProgress] = useState<ProgressStep[]>([])
+    const { lang, setLang, t } = useLang()
     const scrollRef = useRef<HTMLDivElement>(null)
+
+    // Keep the greeting in the chosen language until the conversation starts.
+    useEffect(() => {
+        setMessages(prev => (prev.length === 1 ? [{ role: "assistant", content: t("resolveIntro") }] : prev))
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [lang])
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -46,10 +57,14 @@ export default function ResolvePage() {
         setInput("")
         setMessages(prev => [...prev, { role: "user", content: userMsg }])
         setLoading(true)
+        setProgress([])
 
         try {
             if (!caseState) {
-                const { case_state: data, guide: firstGuide } = await resolveIncident({ description: userMsg, user_context: { country: "India" } })
+                const { case_state: data, guide: firstGuide } = await resolveIncident(
+                    { description: userMsg, user_context: { country: "India", language: lang } },
+                    step => setProgress(prev => [...prev, step]),
+                )
                 setCaseState(data)
                 const first = data.strategy?.lifecycle_plan?.[0]
                 setGuide(firstGuide || (first ? `Step 1: ${first.action}\n${first.description}` : null))
@@ -58,7 +73,7 @@ export default function ResolvePage() {
                     content: `I've analyzed your situation (${data.dimensions.attack_type}). I've created a ${data.strategy.lifecycle_plan.length}-step plan - follow the guide on the right and ask me anything.`
                 }])
             } else {
-                const data = await solveDoubt(userMsg, planContext())
+                const data = await solveDoubt(userMsg, planContext(), lang)
                 setMessages(prev => [...prev, { role: "assistant", content: data.answer, type: "doubt_answer" }])
             }
         } catch (error) {
@@ -73,8 +88,8 @@ export default function ResolvePage() {
         setLoading(true)
         try {
             const content = kind === "legal"
-                ? (await solveDoubt("What are my legal options and rights for this incident in India, and which authorities should I approach?", planContext())).answer
-                : (await assistForm("Draft the complaint text for an FIR / cybercrime.gov.in complaint", planContext())).guidance
+                ? (await solveDoubt("What are my legal options and rights for this incident in India, and which authorities should I approach?", planContext(), lang)).answer
+                : (await assistForm("Draft the complaint text for an FIR / cybercrime.gov.in complaint", planContext(), lang)).guidance
             setMessages(prev => [...prev, { role: "assistant", content, type: kind === "legal" ? "doubt_answer" : "form_guide" }])
         } catch (error) {
             setMessages(prev => [...prev, { role: "assistant", content: errorText(error) }])
@@ -90,6 +105,7 @@ export default function ResolvePage() {
                     <LifeBuoy className="text-emerald-400" />
                     CyberResolve <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">Beta</span>
                 </Link>
+                <LanguageToggle lang={lang} onChange={setLang} />
             </header>
 
             <div className="flex-1 grid lg:grid-cols-3 gap-6 overflow-hidden">
@@ -109,7 +125,12 @@ export default function ResolvePage() {
                                 {m.content}
                             </motion.div>
                         ))}
-                        {loading && (
+                        {loading && !caseState && (
+                            <div className="bg-white/10 w-fit p-4 rounded-xl">
+                                <ProgressSteps steps={progress} active />
+                            </div>
+                        )}
+                        {loading && caseState && (
                             <div className="bg-white/10 w-fit p-4 rounded-xl">
                                 <div className="flex space-x-2">
                                     <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
@@ -123,7 +144,7 @@ export default function ResolvePage() {
                     <div className="p-4 bg-white/5 border-t border-white/10 flex gap-2">
                         <input
                             className="flex-1 bg-transparent border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-colors placeholder:text-gray-600"
-                            placeholder={caseState ? "Ask a doubt or next step..." : "Describe incident..."}
+                            placeholder={caseState ? t("resolveFollowUp") : t("resolvePlaceholder")}
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && handleSend()}
@@ -141,7 +162,7 @@ export default function ResolvePage() {
                             <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-4">
                                 <Card className="border-emerald-500/30 bg-emerald-500/5">
                                     <h3 className="text-emerald-400 font-semibold mb-2 flex items-center gap-2">
-                                        <CheckCircle size={18} /> Current Priority
+                                        <CheckCircle size={18} /> {t("currentPriority")}
                                     </h3>
                                     <div className="text-white text-sm whitespace-pre-wrap">
                                         {guide || "Loading guide..."}
@@ -149,7 +170,7 @@ export default function ResolvePage() {
                                 </Card>
 
                                 <div className="space-y-2">
-                                    <h4 className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Resolution Plan</h4>
+                                    <h4 className="text-gray-500 text-xs uppercase tracking-wider font-semibold">{t("resolutionPlan")}</h4>
                                     {caseState.strategy.lifecycle_plan.map((step, i) => (
                                         <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/5 opacity-50 hover:opacity-100 transition-opacity">
                                             <span className="text-xs text-gray-400">{i + 1}</span>
@@ -159,15 +180,15 @@ export default function ResolvePage() {
                                 </div>
 
                                 <div className="pt-4 border-t border-white/10">
-                                    <h4 className="text-gray-500 text-xs uppercase tracking-wider font-semibold mb-3">Quick Tools</h4>
+                                    <h4 className="text-gray-500 text-xs uppercase tracking-wider font-semibold mb-3">{t("quickTools")}</h4>
                                     <div className="grid grid-cols-2 gap-2">
                                         <Button variant="secondary" disabled={loading} onClick={() => runTool("legal")} className="text-xs h-auto py-2 flex flex-col gap-1">
                                             <HelpCircle size={16} className="text-blue-400" />
-                                            Legal Help
+                                            {t("legalHelp")}
                                         </Button>
                                         <Button variant="secondary" disabled={loading} onClick={() => runTool("fir")} className="text-xs h-auto py-2 flex flex-col gap-1">
                                             <FileText size={16} className="text-purple-400" />
-                                            Draft FIR
+                                            {t("draftFir")}
                                         </Button>
                                     </div>
                                 </div>
@@ -175,7 +196,7 @@ export default function ResolvePage() {
                         ) : (
                             <div className="h-full flex flex-col items-center justify-center text-center text-gray-500 p-6 border border-white/10 rounded-xl bg-white/5">
                                 <LifeBuoy size={48} className="mb-4 opacity-20" />
-                                <p>Describe your incident to generate a custom recovery plan.</p>
+                                <p>{t("resolveEmpty")}</p>
                             </div>
                         )}
                     </AnimatePresence>

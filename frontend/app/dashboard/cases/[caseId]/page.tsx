@@ -223,7 +223,7 @@ export default function CaseInvestigationPage() {
   const priorityActions = confidenceData?.priorityActions || [];
 
   return (
-    <div className="flex h-[calc(100vh-64px)] w-full max-w-[1800px] mx-auto p-4 gap-4 bg-[#020617] overflow-hidden">
+    <div className="flex flex-col lg:flex-row lg:h-[calc(100vh-64px)] w-full max-w-[1800px] mx-auto p-2 sm:p-4 gap-4 bg-[#020617] lg:overflow-hidden">
       <div className="hidden lg:flex w-72 flex-col">
         <ThreatIntelFeed />
       </div>
@@ -231,7 +231,7 @@ export default function CaseInvestigationPage() {
       <motion.div
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
-        className="flex-[1.2] flex flex-col glass-card rounded-2xl overflow-hidden border border-white/5 bg-black/40 backdrop-blur-xl h-full"
+        className="lg:flex-[1.2] flex flex-col glass-card rounded-2xl overflow-hidden border border-white/5 bg-black/40 backdrop-blur-xl h-[75vh] lg:h-full"
       >
         <div className="p-4 border-b border-white/5 bg-slate-900/30 flex justify-between items-center">
           <div className="flex items-center gap-2">
@@ -306,7 +306,7 @@ export default function CaseInvestigationPage() {
       <motion.div
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
-        className="flex-[1.8] flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar h-full"
+        className="lg:flex-[1.8] flex flex-col gap-6 lg:overflow-y-auto lg:pr-2 custom-scrollbar lg:h-full"
       >
         <KnownThreatsPanel threats={knownThreats} />
 
@@ -318,7 +318,7 @@ export default function CaseInvestigationPage() {
           </div>
         )}
 
-        <div className="flex-1 flex flex-col min-h-[500px]">
+        <div className="flex-1 flex flex-col min-h-[460px]">
           <div className="flex gap-1 p-1 bg-black/40 rounded-lg border border-white/5 self-start mb-4">
             {(["graph", "timeline"] as const).map(tab => (
               <button

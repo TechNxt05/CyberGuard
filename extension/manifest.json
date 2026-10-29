@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "CyberGuard Link Shield",
+  "version": "1.0.0",
+  "description": "Warns you about fake bank, payment and government look-alike websites. Your browsing history never leaves your browser.",
+  "permissions": ["tabs", "storage", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "CyberGuard Link Shield" },
+  "options_page": "options.html"
+}

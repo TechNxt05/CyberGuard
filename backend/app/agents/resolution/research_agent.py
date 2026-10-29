@@ -53,22 +53,30 @@ def search_incident_info(query: str, context: dict | None = None) -> str:
     return findings
 
 
+def _search(kind: str, query: str, max_results: int) -> list[dict]:
+    """ddgs raises on an empty result set; that is a normal outcome, not an outage, so it must not trip the breaker."""
+    with DDGS(timeout=_SEARCH_TIMEOUT_SECONDS) as ddgs:
+        try:
+            return list(getattr(ddgs, kind)(query, max_results=max_results))
+        except Exception as e:
+            if "no results" in str(e).lower():
+                return []
+            raise
+
+
 @with_retry_and_circuit_breaker("DuckDuckGo_Web", max_retries=1)
 def perform_web_search(query: str) -> str:
-    with DDGS(timeout=_SEARCH_TIMEOUT_SECONDS) as ddgs:
-        results = [f"- {r['title']}: {r['body']} ({r['href']})" for r in ddgs.text(f"{query} scam fraud", max_results=5)]
+    results = [f"- {r['title']}: {r['body']} ({r['href']})" for r in _search("text", f"{query} scam fraud", 5)]
     return "\n".join(results) or "No web results."
 
 
 @with_retry_and_circuit_breaker("DuckDuckGo_News", max_retries=1)
 def perform_news_search(query: str) -> str:
-    with DDGS(timeout=_SEARCH_TIMEOUT_SECONDS) as ddgs:
-        results = [f"- {r['title']} ({r.get('source', '')}): {r['body']} ({r['url']})" for r in ddgs.news(query, max_results=5)]
+    results = [f"- {r['title']} ({r.get('source', '')}): {r['body']} ({r['url']})" for r in _search("news", query, 5)]
     return "\n".join(results) or "No recent news."
 
 
 @with_retry_and_circuit_breaker("DuckDuckGo_Social", max_retries=1)
 def perform_site_search(query: str, domain: str) -> str:
-    with DDGS(timeout=_SEARCH_TIMEOUT_SECONDS) as ddgs:
-        results = [f"- {r['title']}: {r['body']} ({r['href']})" for r in ddgs.text(f"site:{domain} {query} scam", max_results=4)]
+    results = [f"- {r['title']}: {r['body']} ({r['href']})" for r in _search("text", f"site:{domain} {query} scam", 4)]
     return "\n".join(results) or f"No results on {domain}."

@@ -9,7 +9,7 @@ export class ApiError extends Error {
 type Token = string | null | undefined;
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PUT';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: unknown;
   token?: Token;
   signal?: AbortSignal;
@@ -34,6 +34,49 @@ export async function apiFetch<T>(path: string, { method = 'GET', body, token, s
     throw new ApiError(res.status, detail);
   }
   return res.json() as Promise<T>;
+}
+
+export interface ProgressStep {
+  step: string;
+  label: string;
+}
+
+/**
+ * POSTs to a Server-Sent Events endpoint, calling onProgress for each finished step,
+ * and resolves with the final `result` event (rejects on an `error` event).
+ */
+export async function apiStream<T>(path: string, body: unknown, onProgress: (p: ProgressStep) => void): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) {
+    const err = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, typeof err.detail === 'string' ? err.detail : `Request failed (${res.status})`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary;
+    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+      const chunk = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const event = /^event: (.*)$/m.exec(chunk)?.[1];
+      const data = /^data: (.*)$/m.exec(chunk)?.[1];
+      if (!event || !data) continue;
+      const payload = JSON.parse(data);
+      if (event === 'progress') onProgress(payload);
+      else if (event === 'result') return payload as T;
+      else if (event === 'error') throw new ApiError(500, payload.detail || 'Analysis failed');
+    }
+  }
+  throw new ApiError(500, 'The connection closed before the analysis finished.');
 }
 
 /** Downloads a binary response (e.g. PDF) and triggers a browser save. */
@@ -145,6 +188,7 @@ export interface ScamResult {
     recommendation: string;
     extracted_entities: Record<string, unknown>;
     analysis_status: 'ok' | 'failed';
+    url_checks?: { url: string; domain: string; verdict: string; signals: string[]; domain_age_days?: number; impersonates?: string }[];
     analysis?: string;
   };
   explanation: { simple_explanation: string; trust_score: number };
@@ -156,6 +200,7 @@ export interface AnalysisRequest {
   image_base64?: string;
   image_mime_type?: string;
   source?: string;
+  language?: 'en' | 'hi';
 }
 
 export interface IncidentRequest {
@@ -182,13 +227,14 @@ export const getTimeline = (incidentDescription: string, token: Token) =>
 export const getGraph = (incidentDescription: string, extractedEntities: EntityMap, token: Token) =>
   apiFetch<GraphData>('/api/analysis/graph', { method: 'POST', body: { incidentDescription, extractedEntities }, token });
 
-export const checkScam = (data: AnalysisRequest) => apiFetch<ScamResult>('/analyze-message', { method: 'POST', body: data });
+export const checkScam = (data: AnalysisRequest, onProgress: (p: ProgressStep) => void = () => {}) =>
+  apiStream<ScamResult>('/analyze-message/stream', data, onProgress);
 
-export const resolveIncident = (data: IncidentRequest) =>
-  apiFetch<{ case_state: CaseStateData; guide: string | null }>('/resolve-incident', { method: 'POST', body: data });
+export const resolveIncident = (data: IncidentRequest, onProgress: (p: ProgressStep) => void = () => {}) =>
+  apiStream<{ case_state: CaseStateData; guide: string | null }>('/resolve-incident/stream', data, onProgress);
 
-export const solveDoubt = (question: string, context: string) =>
-  apiFetch<{ answer: string }>('/case/doubt', { method: 'POST', body: { question, context } });
+export const solveDoubt = (question: string, context: string, language: 'en' | 'hi' = 'en') =>
+  apiFetch<{ answer: string }>('/case/doubt', { method: 'POST', body: { question, context, language } });
 
-export const assistForm = (actionItem: string, context: string) =>
-  apiFetch<{ guidance: string; checklist: string[] }>('/case/form-assist', { method: 'POST', body: { action_item: actionItem, context } });
+export const assistForm = (actionItem: string, context: string, language: 'en' | 'hi' = 'en') =>
+  apiFetch<{ guidance: string; checklist: string[] }>('/case/form-assist', { method: 'POST', body: { action_item: actionItem, context, language } });

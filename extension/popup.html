@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 13px/1.4 system-ui, sans-serif; width: 300px; margin: 0; padding: 14px; background: #0f172a; color: #e2e8f0; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    button { width: 100%; padding: 8px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    .verdict { font-weight: 700; text-transform: uppercase; }
+    .malicious { color: #f87171; } .suspicious { color: #fbbf24; } .official { color: #34d399; } .unknown { color: #94a3b8; }
+    ul { padding-left: 16px; margin: 6px 0; } small { color: #94a3b8; } a { color: #93c5fd; }
+  </style>
+</head>
+<body>
+  <h1>CyberGuard Link Shield</h1>
+  <p id="host"></p>
+  <button id="check">Check this site</button>
+  <div id="out"></div>
+  <p><small>Only look-alike sites are checked automatically. Lost money? Call <b>1930</b> · <a href="options.html" target="_blank">Settings</a></small></p>
+  <script src="popup.js"></script>
+</body>
+</html>

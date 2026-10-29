@@ -9,6 +9,7 @@ class AnalysisRequest(BaseModel):
     message: Optional[str] = Field(None, max_length=MAX_TEXT_CHARS, description="The suspicious message text, call summary, or offer content.")
     image_base64: Optional[str] = Field(None, max_length=MAX_IMAGE_BASE64_CHARS, description="Base64 encoded image string if screenshot is provided.")
     image_mime_type: Optional[str] = Field("image/jpeg", pattern=r"^image/(png|jpeg|jpg|webp|gif)$")
+    language: Optional[Literal["en", "hi"]] = Field(None, description="Preferred response language; overrides the inferred one")
     source: Optional[str] = Field("unknown", max_length=50, description="Source of the message (e.g., whatsapp, sms, call, email)")
 
 class UserProfile(BaseModel):
@@ -27,6 +28,7 @@ class ScoutReport(BaseModel):
     severity: Literal["critical", "high", "medium", "low", "safe"] = Field(..., description="Severity level")
     recommendation: str = Field(..., description="Clear action item for the user")
     extracted_entities: dict = Field(default_factory=dict, description="Key details extracted (Date, Amount, URL, etc.)")
+    url_checks: List[dict] = Field(default_factory=list, description="Deterministic link checks (domain age, look-alike, blocklists); filled by the system, not the model")
     analysis_status: Literal["ok", "failed"] = Field("ok", description="'failed' when automated analysis could not run; the verdict is then a cautious default, not a judgement")
 
 class Explanation(BaseModel):

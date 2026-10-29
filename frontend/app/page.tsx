@@ -185,6 +185,11 @@ export default function Home() {
                 </div>
             </div>
 
+            <footer className="max-w-6xl mx-auto mt-16 py-6 border-t border-white/10 flex flex-wrap gap-4 justify-between text-xs text-gray-500">
+                <span>Financial fraud in India? Call <a href="tel:1930" className="text-gray-300 hover:text-white">1930</a> and report at <a href="https://cybercrime.gov.in" target="_blank" rel="noopener noreferrer" className="text-gray-300 hover:text-white">cybercrime.gov.in</a>.</span>
+                <span className="flex gap-4"><Link href="/privacy" className="hover:text-white">Privacy</Link><Link href="/about" className="hover:text-white">About</Link></span>
+            </footer>
+
             {/* Background Elements */}
             <div className="fixed top-0 left-0 w-full h-full pointer-events-none -z-10">
                 <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-900/10 rounded-full blur-[128px]" />

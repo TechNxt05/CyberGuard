@@ -5,7 +5,10 @@ import { ArrowLeft, AlertTriangle, ShieldCheck, ShieldAlert, Search, Loader2, Up
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
-import { ApiError, MAX_IMAGE_BYTES, ScamResult, checkScam } from "@/lib/api"
+import { ApiError, MAX_IMAGE_BYTES, ProgressStep, ScamResult, checkScam } from "@/lib/api"
+import { ProgressSteps } from "@/components/ProgressSteps"
+import { LanguageToggle } from "@/components/LanguageToggle"
+import { useLang } from "@/lib/i18n"
 
 export default function ScamShieldPage() {
     const [input, setInput] = useState("")
@@ -14,6 +17,8 @@ export default function ScamShieldPage() {
     const [imageBase64, setImageBase64] = useState<string | null>(null)
     const [imageMime, setImageMime] = useState("image/jpeg")
     const [error, setError] = useState<string | null>(null)
+    const [progress, setProgress] = useState<ProgressStep[]>([])
+    const { lang, setLang, t } = useLang()
     const [fileName, setFileName] = useState<string | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -22,16 +27,18 @@ export default function ScamShieldPage() {
         setLoading(true)
         setResult(null)
         setError(null)
+        setProgress([])
         try {
             const data = await checkScam({
                 message: input,
                 image_base64: imageBase64 || undefined,
                 image_mime_type: imageBase64 ? imageMime : undefined,
-                source: "user_input"
-            })
+                source: "user_input",
+                language: lang
+            }, step => setProgress(prev => [...prev, step]))
             setResult(data)
         } catch (err) {
-            setError(err instanceof ApiError ? err.message : "Could not reach the server. If it was idle it may take up to a minute to wake up - please retry.")
+            setError(err instanceof ApiError ? err.message : t("serverDown"))
         } finally {
             setLoading(false)
         }
@@ -83,14 +90,17 @@ export default function ScamShieldPage() {
             <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 mb-20">
                 <div className="space-y-6">
                     <div className="space-y-2">
-                        <h1 className="text-3xl font-bold text-white">ScamShield Detector</h1>
-                        <p className="text-gray-400">Paste any suspicious message, email, or UPI ID below.</p>
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <h1 className="text-3xl font-bold text-white">{t("scamTitle")}</h1>
+                            <LanguageToggle lang={lang} onChange={setLang} />
+                        </div>
+                        <p className="text-gray-400">{t("scamSubtitle")}</p>
                     </div>
 
                     <Card className="p-0 border-blue-500/20 overflow-hidden relative group">
                         <textarea
                             className="w-full h-80 bg-transparent p-6 text-white resize-none focus:outline-none placeholder:text-gray-600 font-mono text-sm leading-relaxed"
-                            placeholder="e.g. 'Dear customer, your electricity will be cut at 9PM. Call this number...'"
+                            placeholder={t("scamPlaceholder")}
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                         />
@@ -110,11 +120,11 @@ export default function ScamShieldPage() {
                                 className="bg-white/5 hover:bg-white/10"
                                 onClick={() => fileInputRef.current?.click()}
                             >
-                                <Upload size={16} className="mr-2" /> Upload
+                                <Upload size={16} className="mr-2" /> {t("upload")}
                             </Button>
                             <Button onClick={handleAnalyze} disabled={loading || (!input && !imageBase64)}>
                                 {loading ? <Loader2 className="animate-spin mr-2" /> : <Search className="mr-2" size={16} />}
-                                Analyze Risk
+                                {t("analyze")}
                             </Button>
                         </div>
                         {(input || imageBase64) && (
@@ -130,6 +140,11 @@ export default function ScamShieldPage() {
 
                 {/* Results Section */}
                 <div>
+                    {loading && (
+                        <div className="mb-4 p-4 rounded-lg border border-white/10 bg-white/5">
+                            <ProgressSteps steps={progress} active={loading} />
+                        </div>
+                    )}
                     {error && (
                         <div className="mb-4 p-4 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm">{error}</div>
                     )}
@@ -153,7 +168,7 @@ export default function ScamShieldPage() {
                                                     <h3 className="font-bold text-2xl text-white">{result.scout_report.risk_score}/100</h3>
                                                     <span className={`text-xs px-2 py-0.5 rounded-full border ${result.scout_report.risk_score > 70 ? 'border-red-500 text-red-400' : 'border-green-500 text-green-400'
                                                         }`}>
-                                                        RISK SCORE
+                                                        {t("riskScore")}
                                                     </span>
                                                 </div>
                                                 <p className={`text-sm font-medium ${result.scout_report.risk_score > 70 ? 'text-red-400' : 'text-green-400'}`}>
@@ -165,7 +180,7 @@ export default function ScamShieldPage() {
 
                                     {result.scout_report.analysis_status === "failed" && (
                                         <div className="mb-6 p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
-                                            Automated analysis could not be completed, so this is a cautious default - not a verdict. Treat the message as unverified.
+                                            {t("analysisFailed")}
                                         </div>
                                     )}
 
@@ -175,7 +190,7 @@ export default function ScamShieldPage() {
                                         {/* Extracted Entities */}
                                         {result.scout_report.extracted_entities && Object.keys(result.scout_report.extracted_entities).length > 0 && (
                                             <div className="bg-black/40 rounded-lg p-4 border border-white/5">
-                                                <h4 className="text-xs font-semibold text-gray-400 mb-3 uppercase tracking-wider">Extracted Details</h4>
+                                                <h4 className="text-xs font-semibold text-gray-400 mb-3 uppercase tracking-wider">{t("extracted")}</h4>
                                                 <div className="grid grid-cols-2 gap-4">
                                                     {Object.entries(result.scout_report.extracted_entities).map(([key, value]) => (
                                                         <div key={key}>
@@ -191,7 +206,7 @@ export default function ScamShieldPage() {
                                             <div className="flex gap-3 items-start">
                                                 <Brain className="text-blue-400 mt-1 shrink-0" size={18} />
                                                 <div>
-                                                    <h4 className="font-semibold text-blue-200 mb-1">Mechanism (Logic)</h4>
+                                                    <h4 className="font-semibold text-blue-200 mb-1">{t("mechanism")}</h4>
                                                     <p className="text-gray-300 text-sm leading-relaxed">{result.scout_report.scam_logic || result.scout_report.analysis}</p>
                                                 </div>
                                             </div>
@@ -199,7 +214,7 @@ export default function ScamShieldPage() {
                                             <div className="flex gap-3 items-start">
                                                 <AlertTriangle className="text-orange-400 mt-1 shrink-0" size={18} />
                                                 <div>
-                                                    <h4 className="font-semibold text-orange-200 mb-1">Consequences</h4>
+                                                    <h4 className="font-semibold text-orange-200 mb-1">{t("consequences")}</h4>
                                                     <p className="text-gray-300 text-sm leading-relaxed">{result.scout_report.consequences || "Potential financial or data loss."}</p>
                                                 </div>
                                             </div>
@@ -207,22 +222,37 @@ export default function ScamShieldPage() {
                                             <div className="flex gap-3 items-start">
                                                 <ShieldCheck className="text-green-400 mt-1 shrink-0" size={18} />
                                                 <div>
-                                                    <h4 className="font-semibold text-green-200 mb-1">Recommendation</h4>
+                                                    <h4 className="font-semibold text-green-200 mb-1">{t("recommendation")}</h4>
                                                     <p className="text-gray-300 text-sm leading-relaxed">{result.scout_report.recommendation}</p>
                                                 </div>
                                             </div>
                                         </div>
 
+                                        {!!result.scout_report.url_checks?.length && (
+                                            <div className="bg-black/40 rounded-lg p-4 border border-white/5">
+                                                <h4 className="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">{t("linkChecks")}</h4>
+                                                <ul className="space-y-2">
+                                                    {result.scout_report.url_checks.map(c => (
+                                                        <li key={c.url} className="text-xs">
+                                                            <span className={`font-mono break-all ${c.verdict === "malicious" ? "text-red-400" : c.verdict === "suspicious" ? "text-amber-300" : c.verdict === "official" ? "text-emerald-400" : "text-gray-300"}`}>{c.domain}</span>
+                                                            <span className="ml-2 uppercase text-[10px] text-gray-500">{c.verdict}</span>
+                                                            {c.signals.length > 0 && <p className="text-gray-400 mt-0.5">{c.signals.join(" · ")}</p>}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+
                                         {result.explanation?.simple_explanation && (
                                             <div className="bg-black/40 rounded-lg p-4 border border-white/5">
-                                                <h4 className="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">In simple words</h4>
+                                                <h4 className="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">{t("simpleWords")}</h4>
                                                 <p className="text-gray-300 text-sm leading-relaxed">{result.explanation.simple_explanation}</p>
                                             </div>
                                         )}
 
                                         {result.action_plan?.steps?.length > 0 && (
                                             <div className="bg-black/40 rounded-lg p-4 border border-white/5">
-                                                <h4 className="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">What to do now</h4>
+                                                <h4 className="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">{t("whatToDo")}</h4>
                                                 <ul className="list-disc list-inside space-y-1 text-gray-300 text-sm">
                                                     {result.action_plan.steps.map((step, i) => <li key={i}>{step}</li>)}
                                                 </ul>

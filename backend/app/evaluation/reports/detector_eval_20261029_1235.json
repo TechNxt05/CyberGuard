@@ -1,0 +1,228 @@
+{
+  "generated_at": "2026-10-29T12:35:31.649307Z",
+  "dataset": "scam_eval.jsonl",
+  "samples": 70,
+  "models": {
+    "groq": "openai/gpt-oss-120b",
+    "gemini": "gemini-flash-lite-latest"
+  },
+  "strict": {
+    "tp": 40,
+    "fn": 0,
+    "fp": 2,
+    "tn": 28,
+    "precision": 0.952,
+    "recall": 1.0,
+    "f1": 0.976,
+    "false_negative_rate": 0.0,
+    "false_positive_rate": 0.067
+  },
+  "cautious": {
+    "tp": 40,
+    "fn": 0,
+    "fp": 4,
+    "tn": 26,
+    "precision": 0.909,
+    "recall": 1.0,
+    "f1": 0.952,
+    "false_negative_rate": 0.0,
+    "false_positive_rate": 0.133
+  },
+  "analysis_failures": 0,
+  "median_latency_s": 5.62,
+  "missed_scams": [],
+  "false_alarms": [
+    {
+      "label": "legit",
+      "category": "transaction_alert",
+      "text": "Rs 1,250.00 debited from A/c XX4521 on 12-Oct-26 to VPA swiggy@icici (UPI Ref 427812345678). Not you? Call 1800-1234 - SBI",
+      "verdict": "SCAM",
+      "risk_score": 80,
+      "analysis_status": "ok",
+      "latency_s": 2.68
+    },
+    {
+      "label": "legit",
+      "category": "utility",
+      "text": "Your LPG cylinder booking (Ref 98234) is confirmed. Delivery expected within 2 days. Pay the delivery person as per invoice.",
+      "verdict": "SCAM",
+      "risk_score": 70,
+      "analysis_status": "ok",
+      "latency_s": 5.63
+    }
+  ],
+  "by_category": {
+    "scam/kyc_phishing": {
+      "total": 3,
+      "correct_cautious": 3
+    },
+    "scam/upi_refund": {
+      "total": 3,
+      "correct_cautious": 3
+    },
+    "scam/electricity": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "scam/digital_arrest": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "scam/courier": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "scam/task_job": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "scam/investment": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "scam/lottery": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "scam/sextortion": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "scam/family_emergency": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "scam/tech_support": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "scam/loan": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "scam/sim_swap": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "scam/income_tax": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "scam/customs_gift": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "scam/olx_marketplace": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "scam/lpg_kyc": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "scam/credit_card": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "scam/traffic_challan": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "scam/insurance": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "scam/job_offer": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "scam/romance": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "scam/account_takeover": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "scam/aadhaar": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "legit/otp": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "legit/transaction_alert": {
+      "total": 2,
+      "correct_cautious": 1
+    },
+    "legit/delivery": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "legit/bill": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "legit/personal": {
+      "total": 3,
+      "correct_cautious": 3
+    },
+    "legit/work": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "legit/bank_advisory": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "legit/appointment": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "legit/travel": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "legit/subscription": {
+      "total": 1,
+      "correct_cautious": 0
+    },
+    "legit/education": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "legit/government": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "legit/payment_received": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "legit/promo": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "legit/security_alert": {
+      "total": 2,
+      "correct_cautious": 2
+    },
+    "legit/utility": {
+      "total": 1,
+      "correct_cautious": 0
+    },
+    "legit/insurance": {
+      "total": 1,
+      "correct_cautious": 1
+    },
+    "legit/friend_money": {
+      "total": 1,
+      "correct_cautious": 0
+    },
+    "legit/job": {
+      "total": 1,
+      "correct_cautious": 1
+    }
+  }
+}

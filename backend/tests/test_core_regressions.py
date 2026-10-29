@@ -5,19 +5,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-@pytest.fixture(autouse=True)
-def no_llm_keys(monkeypatch):
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
-    from app.services.llm_provider import get_llm, get_vision_llm
-    get_llm.cache_clear()
-    get_vision_llm.cache_clear()
-    yield
-    get_llm.cache_clear()
-    get_vision_llm.cache_clear()
-
-
 def test_resolve_graph_runs_without_thread_id(monkeypatch):
     """The graph used to be compiled with a checkpointer and crashed on every invoke without a thread_id."""
     import app.workflows.cyber_resolve_graph as graph

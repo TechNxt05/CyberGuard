@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MemoryStats, MemoryStatsData } from "@/components/MemoryStats";
 import { apiFetch } from "@/lib/api";
+import { ReportIndicator } from "@/components/ReportIndicator";
 
 interface Case {
     _id: string;
@@ -69,6 +70,31 @@ export default function Dashboard() {
         }
     };
 
+    const downloadMyData = async () => {
+        try {
+            const data = await apiFetch<unknown>("/me/data", { token: await getToken() });
+            const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "cyberguard-my-data.json";
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch {
+            alert("Could not export your data. Please try again.");
+        }
+    };
+
+    const deleteMyData = async () => {
+        if (!confirm("Permanently delete ALL your cases, messages and reports? This cannot be undone.")) return;
+        try {
+            await apiFetch("/me/data", { method: "DELETE", token: await getToken() });
+            setCases([]);
+            alert("All your data has been deleted.");
+        } catch {
+            alert("Could not delete your data. Please try again.");
+        }
+    };
+
     if (!isLoaded || !isSignedIn) {
         return <div className="min-h-screen bg-background flex items-center justify-center text-white">Loading...</div>;
     }
@@ -123,7 +149,7 @@ export default function Dashboard() {
                 {/* Persistent Memory Layer Stats Widget */}
                 <MemoryStats stats={stats} loading={statsLoading} />
 
-                <div className="flex justify-between items-center mb-6">
+                <div className="flex justify-between items-center mb-6 gap-3 flex-wrap">
                     <h2 className="text-xl font-semibold text-white">Your Cases</h2>
                     <Button onClick={() => setIsModalOpen(true)} className="bg-blue-600 hover:bg-blue-700">
                         <Plus size={16} className="mr-2" /> New Case
@@ -162,6 +188,14 @@ export default function Dashboard() {
                         ))}
                     </div>
                 )}
+                <ReportIndicator />
+
+                <section className="mt-16 pt-6 border-t border-white/10 flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                    <span>Your data:</span>
+                    <button onClick={downloadMyData} className="hover:text-white underline">Download</button>
+                    <button onClick={deleteMyData} className="text-red-400/80 hover:text-red-400 underline">Delete everything</button>
+                    <Link href="/privacy" className="hover:text-white underline">Privacy</Link>
+                </section>
             </main>
         </div>
     );

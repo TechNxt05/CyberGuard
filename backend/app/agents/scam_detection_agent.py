@@ -1,8 +1,9 @@
 import logging
 
 from app.schemas.common import ScoutReport, UserProfile
-from app.services.llm_provider import get_vision_llm, image_message, response_text, structured_call
+from app.services.llm_provider import get_vision_llm, image_message, language_instruction, response_text, structured_call
 from app.services.scam_knowledge import get_scam_rules, search_scam_patterns
+from app.services.url_intel import check_urls_in_text, risk_floor
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,9 @@ def detect_scam(message: str | None, user_profile: UserProfile, image_base64: st
     if not message:
         return _failed_report("no content was provided")
 
+    url_checks = check_urls_in_text(message)
+    evidence = "\n".join(f"- {c['url']}: {c['verdict']} ({'; '.join(c['signals']) or 'no signals'})" for c in url_checks)
+
     user = f"""
 Analyze this message: "{message}"
 
@@ -58,11 +62,33 @@ Known scam rules:
 
 User profile: {user_profile.model_dump()}
 
+Automated link checks (reliable facts, weigh them heavily):
+{evidence or "No links in the message."}
+
 Fill every field. scam_probability and risk_score are 0-100. scam_logic explains EXACTLY how the trick works,
 consequences explains EXACTLY what the victim could lose, recommendation gives a clear DO and DON'T.
 """
     try:
-        return structured_call(SYSTEM, user, ScoutReport, temperature=0.2)
+        report = structured_call(SYSTEM, user + language_instruction(user_profile.language), ScoutReport, temperature=0.2)
     except Exception as e:
         logger.error("Scam detection LLM call failed: %s", e)
-        return _failed_report("the AI model is unavailable")
+        report = _failed_report("the AI model is unavailable")
+    return apply_url_evidence(report, url_checks)
+
+
+_VERDICT_RANK = {"SAFE": 0, "SUSPICIOUS": 1, "SCAM": 2}
+
+
+def apply_url_evidence(report: ScoutReport, url_checks: list[dict]) -> ScoutReport:
+    """Hard evidence sets a floor the model can't argue below (e.g. a days-old look-alike bank domain)."""
+    report.url_checks = url_checks
+    floor = risk_floor(url_checks)
+    if floor:
+        min_risk, min_verdict = floor
+        report.risk_score = max(report.risk_score, min_risk)
+        report.scam_probability = max(report.scam_probability, float(min_risk))
+        if _VERDICT_RANK[report.verdict] < _VERDICT_RANK[min_verdict]:
+            report.verdict = min_verdict
+        if report.severity in ("safe", "low", "medium") and min_risk >= 85:
+            report.severity = "high"
+    return report

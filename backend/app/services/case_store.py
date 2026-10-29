@@ -1,4 +1,5 @@
 """MongoDB persistence for user cases, chat history, tasks and analysed scam reports."""
+import hashlib
 import uuid
 from datetime import datetime
 
@@ -7,6 +8,9 @@ from fastapi import HTTPException
 from app.db.mongodb import get_db
 from app.schemas.case import Case, CaseMessage, Task
 from app.schemas.common import ScamAnalysisResult
+
+SCAM_REPORT_RETENTION_DAYS = 90
+CASE_COLLECTIONS = ("case_messages", "case_tasks", "case_state")
 
 CASE_DETAIL_FIELDS = {"incident_summary", "attack_type", "incident_logic", "prevention_tips", "title", "current_phase"}
 
@@ -24,7 +28,11 @@ async def ensure_indexes() -> None:
     await db["case_messages"].create_index([("case_id", 1), ("user_id", 1), ("timestamp", -1)])
     await db["case_tasks"].create_index([("case_id", 1), ("user_id", 1)], unique=True)
     await db["case_state"].create_index([("case_id", 1), ("user_id", 1)], unique=True)
-    await db["scam_reports"].create_index([("timestamp", -1)])
+    # Anonymous ScamShield reports expire automatically (MongoDB TTL index).
+    await db["scam_reports"].create_index("timestamp", expireAfterSeconds=SCAM_REPORT_RETENTION_DAYS * 24 * 3600)
+    await db["audit_log"].create_index([("timestamp", -1)])
+    await db["indicator_reports"].create_index([("status", 1), ("created_at", 1)])
+    await db["indicator_reports"].create_index([("reporter_id", 1), ("entity_type", 1), ("value", 1)], unique=True)
 
 
 async def create_case(user_id: str, title: str, summary: str = "") -> str:
@@ -46,9 +54,11 @@ async def list_user_cases(user_id: str) -> list[dict]:
     return await db["cases"].find({"user_id": user_id}).sort("updated_at", -1).to_list(length=50)
 
 
-async def add_case_message(case_id: str, user_id: str, sender: str, content: str) -> None:
+async def add_case_message(case_id: str, user_id: str, sender: str, content: str, attachment: dict | None = None) -> None:
     db = await _db()
     msg = CaseMessage(case_id=case_id, user_id=user_id, sender=sender, content=content).model_dump()
+    if attachment:
+        msg["attachment"] = attachment
     await db["case_messages"].insert_one(msg)
 
 
@@ -107,6 +117,45 @@ async def get_tasks(case_id: str, user_id: str) -> list[dict]:
     db = await _db()
     doc = await db["case_tasks"].find_one({"case_id": case_id, "user_id": user_id})
     return doc.get("tasks", []) if doc else []
+
+
+async def audit(action: str, user_id: str, details: dict | None = None) -> None:
+    """Append-only record of sensitive actions. The user id is hashed so the log survives data deletion without identifying anyone."""
+    db = await _db()
+    await db["audit_log"].insert_one({
+        "action": action,
+        "user_hash": hashlib.sha256(user_id.encode()).hexdigest()[:16],
+        "details": details or {},
+        "timestamp": datetime.utcnow(),
+    })
+
+
+async def delete_case(case_id: str, user_id: str) -> bool:
+    db = await _db()
+    result = await db["cases"].delete_one({"_id": case_id, "user_id": user_id})
+    if not result.deleted_count:
+        return False
+    for name in CASE_COLLECTIONS:
+        await db[name].delete_many({"case_id": case_id, "user_id": user_id})
+    return True
+
+
+async def delete_user_data(user_id: str) -> dict:
+    """Deletes every case, message, task and state belonging to the user."""
+    db = await _db()
+    counts = {"cases": (await db["cases"].delete_many({"user_id": user_id})).deleted_count}
+    counts["indicator_reports"] = (await db["indicator_reports"].delete_many({"reporter_id": user_id})).deleted_count
+    for name in CASE_COLLECTIONS:
+        counts[name] = (await db[name].delete_many({"user_id": user_id})).deleted_count
+    return counts
+
+
+async def export_user_data(user_id: str) -> dict:
+    db = await _db()
+    data = {"cases": await db["cases"].find({"user_id": user_id}).to_list(length=None)}
+    for name in CASE_COLLECTIONS:
+        data[name] = await db[name].find({"user_id": user_id}, {"_id": 0}).to_list(length=None)
+    return data
 
 
 async def store_scam_case(result: ScamAnalysisResult) -> None:

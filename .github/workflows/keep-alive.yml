@@ -1,5 +1,6 @@
 # Pings the Render backend so the free instance doesn't sleep (it spins down after 15 idle minutes).
 # One always-on free web service uses ~744 of Render's 750 free instance-hours per month.
+# Prefer UptimeRobot (free, 5-min checks + downtime alerts) as the primary pinger; GitHub may delay scheduled runs.
 # Setup: repo Settings -> Secrets and variables -> Actions -> Variables -> add BACKEND_URL
 #        (e.g. https://cyberguard-backend.onrender.com).
 # Note: GitHub pauses scheduled workflows after 60 days without repository activity.

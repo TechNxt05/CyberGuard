@@ -6,6 +6,8 @@ from pymongo import ReturnDocument
 # An indicator becomes a "confirmed threat" only when this many *different signed-in users* reported it,
 # so a single caller can't brand an innocent phone number or UPI ID as malicious by repeating it.
 CONFIRMATION_THRESHOLD = 3
+# Indicators nobody has reported for a year are dropped automatically (MongoDB TTL index on last_seen).
+RETENTION_DAYS = 365
 
 
 def _iso(value) -> str:
@@ -34,6 +36,7 @@ class ThreatMemoryService:
         await self.collection.create_index([("entity_type", 1), ("entity_value_normalized", 1)], unique=True)
         await self.collection.create_index([("occurrence_count", 1), ("last_seen", -1)])
         await self.collection.create_index("risk_score")
+        await self.collection.create_index("last_seen", expireAfterSeconds=RETENTION_DAYS * 24 * 3600)
 
     async def store_entities(self, entities: dict, case_id: str, crime_type: str, reporter_id: str) -> dict:
         """Upserts every indicator from one investigation. Returns counts of new vs updated entities."""
@@ -81,6 +84,28 @@ class ThreatMemoryService:
                     updated_count += 1
 
         return {"new_entities": new_count, "updated_entities": updated_count}
+
+    async def _recompute(self, query: dict) -> None:
+        """Re-derives risk after reporters/cases are removed; deletes indicators nobody reports any more."""
+        async for doc in self.collection.find(query):
+            reporters = len(doc.get("reporter_ids", []))
+            if reporters == 0:
+                await self.collection.delete_one({"_id": doc["_id"]})
+                continue
+            await self.collection.update_one({"_id": doc["_id"]}, {"$set": {
+                "risk_score": self._compute_risk_score(reporters),
+                "is_confirmed_threat": reporters >= CONFIRMATION_THRESHOLD,
+                "victim_count": reporters,
+            }})
+
+    async def forget_reporter(self, reporter_id: str) -> None:
+        """Removes a user's contributions (used when they delete their data)."""
+        affected = [d["_id"] async for d in self.collection.find({"reporter_ids": reporter_id}, {"_id": 1})]
+        await self.collection.update_many({"_id": {"$in": affected}}, {"$pull": {"reporter_ids": reporter_id}})
+        await self._recompute({"_id": {"$in": affected}})
+
+    async def forget_case(self, case_id: str) -> None:
+        await self.collection.update_many({"case_ids": case_id}, {"$pull": {"case_ids": case_id}})
 
     async def check_entities(self, entities: dict) -> list[dict]:
         """Returns known indicators among `entities`, highest risk first."""

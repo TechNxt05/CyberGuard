@@ -3,6 +3,8 @@ import os
 from typing import Dict
 from pydantic import BaseModel
 
+from app.services.official_sources import OFFICIAL_DOMAINS
+
 
 # --- Static Registry of Verified Official Links ---
 # This prevents hallucinations and phishing.
@@ -21,7 +23,7 @@ VERIFIED_AUTHORITIES = {
     "rbi_ombudsman": {
         "name": "RBI Ombudsman",
         "home": "https://cms.rbi.org.in/",
-        "file_complaint": "https://cms.rbi.org.in/cms/indexPage.aspx?aspxerrorpath=/cms/cms/indexPage.aspx"
+        "file_complaint": "https://cms.rbi.org.in/"
     },
     "instagram": {
         "name": "Instagram Help Center",
@@ -33,7 +35,7 @@ VERIFIED_AUTHORITIES = {
     },
     "whatsapp": {
         "name": "WhatsApp Grievance Officer",
-        "contact": "https://www.whatsapp.com/contact/nodal"
+        "contact": "https://www.whatsapp.com/contact"
     }
 }
 
@@ -55,6 +57,13 @@ def get_official_link(key: str) -> Dict:
     for k, v in VERIFIED_AUTHORITIES.items():
         if k in key or (len(key) >= 5 and key in k):
             return v
+    # Fall back to the wider official-domain list (banks, payment apps, platforms, couriers, telecom).
+    generic = {"bank", "national", "union", "india", "punjab", "google", "x"}
+    for name, domains in OFFICIAL_DOMAINS.items():
+        brand = name.lower().split()[0]
+        full = name.lower().split("(")[0].replace(" ", "")
+        if (brand not in generic and brand in key) or full in key:
+            return {"name": name, "home": f"https://{domains[0]}"}
     return {"error": "Authority not found in verified registry."}
 
 def check_website_status(url: str) -> str:

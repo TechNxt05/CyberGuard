@@ -2,7 +2,7 @@ import logging
 from typing import Dict, Optional
 
 from app.schemas.resolution import IncidentDimensions
-from app.services.llm_provider import structured_call
+from app.services.llm_provider import language_instruction, structured_call
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ SYSTEM = (
 
 def understand_incident(description: str, context: Optional[Dict] = None) -> IncidentDimensions:
     try:
-        return structured_call(SYSTEM, f"User description: {description}\nUser context: {context or {}}", IncidentDimensions, temperature=0)
+        return structured_call(SYSTEM, f"User description: {description}\nUser context: {context or {}}" + language_instruction((context or {}).get("language")), IncidentDimensions, temperature=0)
     except Exception as e:
         logger.error("Incident understanding failed: %s", e)
         return IncidentDimensions(

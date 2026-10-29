@@ -20,8 +20,11 @@ class AgentState(TypedDict):
 
 
 def profiling_node(state: AgentState):
-    msg = state["request"].message or "Image analysis request"
-    return {"user_profile": profile_user(msg, state["request"].source)}
+    request = state["request"]
+    profile = profile_user(request.message or "Image analysis request", request.source)
+    if request.language:
+        profile.language = request.language
+    return {"user_profile": profile}
 
 
 def detection_node(state: AgentState):
